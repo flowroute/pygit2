@@ -1,0 +1,11 @@
+pygit2 (0.17.3+git20130302-1) quantal; urgency=low
+
+  * Rebuild after libgit2 was fixed
+
+ -- Dennis Kaarsemaker <dennis@kaarsemaker.net>  Sun, 03 Mar 2013 17:07:37 +0100
+
+pygit2 (0.17.3+git20130302) quantal; urgency=low
+
+  * Initial release.
+
+ -- Dennis Kaarsemaker <dennis@kaarsemaker.net>  Sun, 03 Mar 2013 00:45:25 +0100
