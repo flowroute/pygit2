@@ -33,7 +33,9 @@
 #include <pygit2/utils.h>
 #include <pygit2/object.h>
 #include <pygit2/oid.h>
+#include <pygit2/note.h>
 #include <pygit2/repository.h>
+#include <pygit2/remote.h>
 
 extern PyObject *GitError;
 
@@ -46,6 +48,8 @@ extern PyTypeObject ConfigType;
 extern PyTypeObject DiffType;
 extern PyTypeObject RemoteType;
 extern PyTypeObject ReferenceType;
+extern PyTypeObject NoteType;
+extern PyTypeObject NoteIterType;
 
 git_otype
 int_to_loose_object_type(int type_id)
@@ -101,6 +105,9 @@ Repository_init(Repository *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
+    self->config = NULL;
+    self->index = NULL;
+
     return 0;
 }
 
@@ -108,7 +115,8 @@ void
 Repository_dealloc(Repository *self)
 {
     PyObject_GC_UnTrack(self);
-    Py_XDECREF(self->index);
+    Py_CLEAR(self->index);
+    Py_CLEAR(self->config);
     git_repository_free(self->repo);
     PyObject_GC_Del(self);
 }
@@ -372,7 +380,11 @@ Repository_read(Repository *self, PyObject *py_hex)
         return NULL;
 
     tuple = Py_BuildValue(
+    #if PY_MAJOR_VERSION == 2
         "(ns#)",
+    #else
+        "(ny#)",
+    #endif
         git_odb_object_type(obj),
         git_odb_object_data(obj),
         git_odb_object_size(obj));
@@ -493,7 +505,7 @@ PyDoc_STRVAR(Repository_config__doc__,
   "(if they are available).");
 
 PyObject *
-Repository_config__get__(Repository *self, void *closure)
+Repository_config__get__(Repository *self)
 {
     int err;
     git_config *config;
@@ -506,20 +518,18 @@ Repository_config__get__(Repository *self, void *closure)
         if (err < 0)
             return Error_set(err);
 
-        py_config = PyObject_GC_New(Config, &ConfigType);
-        if (!py_config) {
+        py_config = PyObject_New(Config, &ConfigType);
+        if (py_config == NULL) {
             git_config_free(config);
             return NULL;
         }
 
-        Py_INCREF(self);
-        py_config->repo = self;
         py_config->config = config;
-        PyObject_GC_Track(py_config);
         self->config = (PyObject*)py_config;
+    } else {
+        Py_INCREF(self->config);
     }
 
-    Py_INCREF(self->config);
     return self->config;
 }
 
@@ -814,90 +824,97 @@ Repository_lookup_reference(Repository *self, PyObject *py_name)
         return err_obj;
     }
     free(c_name);
+
     /* 3- Make an instance of Reference and return it */
     return wrap_reference(c_reference);
 }
 
-PyDoc_STRVAR(Repository_create_reference__doc__,
-  "create_reference(name, source, force=False, symbolic=False) -> Reference\n"
+PyDoc_STRVAR(Repository_create_direct_reference__doc__,
+  "create_reference(name, target, force) -> Reference\n"
   "\n"
-  "Create a new reference \"name\" which points to a object or another\n"
-  "reference.\n"
+  "Create a new reference \"name\" which points to an object.\n"
   "\n"
-  "Keyword arguments:\n"
+  "Arguments:\n"
   "\n"
   "force\n"
   "    If True references will be overridden, otherwise (the default) an\n"
   "    exception is raised.\n"
   "\n"
-  "symbolic\n"
-  "    If True a symbolic reference will be created, then source has to be a\n"
-  "    valid existing reference name; if False (the default) a normal\n"
-  "    reference will be created, then source must has to be a valid SHA\n"
-  "    hash.\n"
-  "\n"
   "Examples::\n"
   "\n"
-  "  repo.create_reference('refs/heads/foo', repo.head.hex)\n"
-  "  repo.create_reference('refs/tags/foo', 'refs/heads/master', symbolic=True)");
+  "    repo.create_direct_reference('refs/heads/foo', repo.head.hex, False)");
 
 PyObject *
-Repository_create_reference(Repository *self,  PyObject *args, PyObject *kw)
+Repository_create_direct_reference(Repository *self,  PyObject *args,
+                                   PyObject *kw)
 {
     PyObject *py_obj;
     git_reference *c_reference;
-    char *c_name, *c_target;
+    char *c_name;
     git_oid oid;
-    int err = 0, symbolic = 0, force = 0;
+    int err, force;
 
-    static char *kwlist[] = {"name", "source", "force", "symbolic", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kw, "sO|ii", kwlist,
-                                     &c_name, &py_obj, &force, &symbolic))
+    if (!PyArg_ParseTuple(args, "sOi", &c_name, &py_obj, &force))
         return NULL;
 
-    if (!symbolic) {
-        err = py_str_to_git_oid_expand(self->repo, py_obj, &oid);
-        if (err < 0)
-            return Error_set(err);
+    err = py_str_to_git_oid_expand(self->repo, py_obj, &oid);
+    if (err < 0)
+        return Error_set(err);
 
-        err = git_reference_create(&c_reference, self->repo, c_name, &oid,
-                                   force);
-    } else {
-        #if PY_MAJOR_VERSION == 2
-        c_target = PyString_AsString(py_obj);
-        #else
-        c_target = PyString_AsString(PyUnicode_AsASCIIString(py_obj));
-        #endif
-        if (c_target == NULL)
-            return NULL;
-
-        err = git_reference_symbolic_create(&c_reference, self->repo, c_name,
-                                            c_target, force);
-    }
-
+    err = git_reference_create(&c_reference, self->repo, c_name, &oid, force);
     if (err < 0)
         return Error_set(err);
 
     return wrap_reference(c_reference);
 }
 
-
-PyDoc_STRVAR(Repository_packall_references__doc__,
-  "packall_references()\n"
+PyDoc_STRVAR(Repository_create_symbolic_reference__doc__,
+  "create_symbolic_reference(name, source, force) -> Reference\n"
   "\n"
-  "Pack all the loose references in the repository.");
+  "Create a new reference \"name\" which points to another reference.\n"
+  "\n"
+  "Arguments:\n"
+  "\n"
+  "force\n"
+  "    If True references will be overridden, otherwise (the default) an\n"
+  "    exception is raised.\n"
+  "\n"
+  "Examples::\n"
+  "\n"
+  "    repo.create_reference('refs/tags/foo', 'refs/heads/master', False)");
 
 PyObject *
-Repository_packall_references(Repository *self, PyObject *args)
+Repository_create_symbolic_reference(Repository *self,  PyObject *args,
+                                     PyObject *kw)
 {
-    int err;
+    PyObject *py_obj;
+    git_reference *c_reference;
+    char *c_name, *c_target;
+    int err, force;
 
-    err = git_reference_packall(self->repo);
+    if (!PyArg_ParseTuple(args, "sOi", &c_name, &py_obj, &force))
+        return NULL;
+
+    #if PY_MAJOR_VERSION == 2
+    c_target = PyBytes_AsString(py_obj);
+    #else
+    // increases ref counter, so we have to release it afterwards
+    PyObject* py_str = PyUnicode_AsASCIIString(py_obj);
+    c_target = PyBytes_AsString(py_str);
+    #endif
+    if (c_target == NULL)
+        return NULL;
+
+    err = git_reference_symbolic_create(&c_reference, self->repo, c_name,
+                                        c_target, force);
+    #if PY_MAJOR_VERSION > 2
+      Py_CLEAR(py_str);
+    #endif
+
     if (err < 0)
         return Error_set(err);
 
-    Py_RETURN_NONE;
+    return wrap_reference(c_reference);
 }
 
 
@@ -913,9 +930,14 @@ read_status_cb(const char *path, unsigned int status_flags, void *payload)
     /* This is the callback that will be called in git_status_foreach. It
      * will be called for every path.*/
     PyObject *flags;
+    int err;
 
-    flags = PyInt_FromLong((long) status_flags);
-    PyDict_SetItemString(payload, path, flags);
+    flags = PyLong_FromLong((long) status_flags);
+    err = PyDict_SetItemString(payload, path, flags);
+    Py_CLEAR(flags);
+
+    if (err < 0)
+        return GIT_ERROR;
 
     return GIT_OK;
 }
@@ -954,7 +976,7 @@ Repository_status_file(Repository *self, PyObject *value)
         free(path);
         return err_obj;
     }
-    return PyInt_FromLong(status);
+    return PyLong_FromLong(status);
 }
 
 
@@ -1035,7 +1057,7 @@ Repository_create_remote(Repository *self, PyObject *args)
     if (err < 0)
         return Error_set(err);
 
-    py_remote = (Remote*) PyType_GenericNew(&RemoteType, NULL, NULL);
+    py_remote = PyObject_New(Remote, &RemoteType);
     py_remote->repo = self;
     py_remote->remote = remote;
 
@@ -1049,20 +1071,23 @@ PyObject *
 Repository_remotes__get__(Repository *self)
 {
     git_strarray remotes;
-    PyObject* py_list = NULL, *py_tmp;
+    PyObject* py_list = NULL, *py_args = NULL;
+    Remote *py_remote;
     size_t i;
 
     git_remote_list(&remotes, self->repo);
 
     py_list = PyList_New(remotes.count);
     for (i=0; i < remotes.count; ++i) {
-        py_tmp = INSTANCIATE_CLASS(RemoteType, Py_BuildValue("Os", self, remotes.strings[i]));
-        PyList_SetItem(py_list, i, py_tmp);
+        py_remote = PyObject_New(Remote, &RemoteType);
+        py_args = Py_BuildValue("Os", self, remotes.strings[i]);
+        Remote_init(py_remote, py_args, NULL);
+        PyList_SetItem(py_list, i, (PyObject*) py_remote);
     }
 
     git_strarray_free(&remotes);
 
-    return py_list;
+    return (PyObject*) py_list;
 }
 
 
@@ -1099,6 +1124,7 @@ Repository_checkout(Repository *self, PyObject *args, PyObject *kw)
                 err = git_repository_set_head(self->repo,
                           git_reference_name(ref->reference));
             }
+            git_object_free(object);
         }
     } else { /* checkout from head / index */
         opts.checkout_strategy = strategy;
@@ -1113,6 +1139,93 @@ Repository_checkout(Repository *self, PyObject *args, PyObject *kw)
 }
 
 
+PyDoc_STRVAR(Repository_notes__doc__, "");
+
+PyObject *
+Repository_notes(Repository *self, PyObject* args)
+{
+    NoteIter *iter = NULL;
+    char *ref = "refs/notes/commits";
+    int err = GIT_ERROR;
+
+    if (!PyArg_ParseTuple(args, "|s", &ref))
+        return NULL;
+
+    iter = PyObject_New(NoteIter, &NoteIterType);
+    if (iter != NULL) {
+        iter->repo = self;
+        iter->ref = ref;
+
+        err = git_note_iterator_new(&iter->iter, self->repo, iter->ref);
+        if (err == GIT_OK) {
+            Py_INCREF(self);
+            return (PyObject*)iter;
+        }
+    }
+
+    return Error_set(err);
+
+}
+
+
+PyDoc_STRVAR(Repository_create_note__doc__,
+  "create_note(message, author, committer, annotated_id [,ref, force]) -> ID\n"
+  "\n"
+  "Create a new note for an object, return its SHA-ID."
+  "If no ref is given 'refs/notes/commits' will be used.");
+
+PyObject *
+Repository_create_note(Repository *self, PyObject* args)
+{
+    git_oid note_id, annotated_id;
+    char *annotated = NULL, *message = NULL, *ref = "refs/notes/commits";
+    int err = GIT_ERROR;
+    unsigned int force = 0;
+    Signature *py_author, *py_committer;
+
+    if (!PyArg_ParseTuple(args, "sO!O!s|si",
+                          &message,
+                          &SignatureType, &py_author,
+                          &SignatureType, &py_committer,
+                          &annotated, &ref, &force))
+        return NULL;
+
+    err = git_oid_fromstr(&annotated_id, annotated);
+    if (err < 0)
+        return Error_set(err);
+
+    err = git_note_create(&note_id, self->repo, py_author->signature,
+                          py_committer->signature, ref,
+                          &annotated_id, message, force);
+    if (err < 0)
+        return Error_set(err);
+
+    return git_oid_to_python(note_id.id);
+}
+
+
+PyDoc_STRVAR(Repository_lookup_note__doc__,
+  "lookup_note(annotated_id [, ref]) -> Note\n"
+  "\n"
+  "Lookup a note for an annotated object in a repository.");
+
+PyObject *
+Repository_lookup_note(Repository *self, PyObject* args)
+{
+    git_oid annotated_id;
+    char* annotated = NULL, *ref = "refs/notes/commits";
+    int err;
+
+    if (!PyArg_ParseTuple(args, "s|s", &annotated, &ref))
+        return NULL;
+
+    err = git_oid_fromstr(&annotated_id, annotated);
+    if (err < 0)
+        return Error_set(err);
+
+    return (PyObject*) wrap_note(self, &annotated_id, ref);
+}
+
 PyMethodDef Repository_methods[] = {
     METHOD(Repository, create_blob, METH_VARARGS),
     METHOD(Repository, create_blob_fromfile, METH_VARARGS),
@@ -1122,15 +1235,18 @@ PyMethodDef Repository_methods[] = {
     METHOD(Repository, walk, METH_VARARGS),
     METHOD(Repository, read, METH_O),
     METHOD(Repository, write, METH_VARARGS),
-    METHOD(Repository, create_reference, METH_VARARGS|METH_KEYWORDS),
+    METHOD(Repository, create_direct_reference, METH_VARARGS),
+    METHOD(Repository, create_symbolic_reference, METH_VARARGS),
     METHOD(Repository, listall_references, METH_VARARGS),
     METHOD(Repository, lookup_reference, METH_O),
-    METHOD(Repository, packall_references, METH_NOARGS),
     METHOD(Repository, revparse_single, METH_O),
     METHOD(Repository, status, METH_NOARGS),
     METHOD(Repository, status_file, METH_O),
     METHOD(Repository, create_remote, METH_VARARGS),
     METHOD(Repository, checkout, METH_VARARGS|METH_KEYWORDS),
+    METHOD(Repository, notes, METH_VARARGS),
+    METHOD(Repository, create_note, METH_VARARGS),
+    METHOD(Repository, lookup_note, METH_VARARGS),
     {NULL}
 };
 

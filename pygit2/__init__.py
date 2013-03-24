@@ -25,6 +25,22 @@
 # the Free Software Foundation, 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301, USA.
 
-from .version import __version__
+# Import from the future
+from __future__ import absolute_import
+
+# Low level API
+import _pygit2
 from _pygit2 import *
+
+# High level API
+from .repository import Repository
+from .version import __version__
 import pygit2.utils
+
+
+def init_repository(path, bare=False):
+    """
+    Creates a new Git repository in the given path.
+    """
+    _pygit2.init_repository(path, bare)
+    return Repository(path)

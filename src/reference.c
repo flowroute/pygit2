@@ -43,45 +43,28 @@ extern PyTypeObject RefLogEntryType;
 
 void RefLogIter_dealloc(RefLogIter *self)
 {
-    Py_XDECREF(self->reference);
     git_reflog_free(self->reflog);
-    PyObject_GC_Del(self);
+    PyObject_Del(self);
 }
 
-PyObject* RefLogIter_iternext(PyObject *self)
+PyObject* RefLogIter_iternext(RefLogIter *self)
 {
-    RefLogIter *p = (RefLogIter *) self;
     const git_reflog_entry *entry;
-    char oid_old[40], oid_new[40];
+    RefLogEntry *py_entry;
 
-    if (p->i < p->size) {
-        RefLogEntry *py_entry;
-        git_signature *signature;
+    if (self->i < self->size) {
+        entry = git_reflog_entry_byindex(self->reflog, self->i);
+        py_entry = PyObject_New(RefLogEntry, &RefLogEntryType);
 
-        entry = git_reflog_entry_byindex(p->reflog, p->i);
-        py_entry = (RefLogEntry*) PyType_GenericNew(&RefLogEntryType, NULL,
-                                                    NULL);
-
-        git_oid_fmt(oid_old, git_reflog_entry_id_old(entry));
-        git_oid_fmt(oid_new, git_reflog_entry_id_new(entry));
-
-        py_entry->oid_new = PyUnicode_FromStringAndSize(oid_new, 40);
-        py_entry->oid_old = PyUnicode_FromStringAndSize(oid_old, 40);
-
+        py_entry->oid_old = git_oid_allocfmt(git_reflog_entry_id_old(entry));
+        py_entry->oid_new = git_oid_allocfmt(git_reflog_entry_id_new(entry));
         py_entry->message = strdup(git_reflog_entry_message(entry));
+        py_entry->signature = git_signature_dup(
+            git_reflog_entry_committer(entry));
 
-        signature = git_signature_dup(
-              git_reflog_entry_committer(entry)
-            );
-
-        if (signature != NULL)
-            py_entry->committer = build_signature(
-                (Object*)py_entry, signature, "utf-8");
-
-        ++(p->i);
+        ++(self->i);
 
         return (PyObject*) py_entry;
-
     }
 
     PyErr_SetNone(PyExc_StopIteration);
@@ -146,7 +129,9 @@ Reference_delete(Reference *self, PyObject *args)
     if (err < 0)
         return Error_set(err);
 
+    git_reference_free(self->reference);
     self->reference = NULL; /* Invalidate the pointer */
+
     Py_RETURN_NONE;
 }
 
@@ -161,6 +146,7 @@ Reference_rename(Reference *self, PyObject *py_name)
 {
     char *c_name;
     int err;
+    git_reference *new_reference;
 
     CHECK_REFERENCE(self);
 
@@ -170,33 +156,13 @@ Reference_rename(Reference *self, PyObject *py_name)
         return NULL;
 
     /* Rename */
-    err = git_reference_rename(self->reference, c_name, 0);
+    err = git_reference_rename(&new_reference, self->reference, c_name, 0);
+    git_reference_free(self->reference);
     free(c_name);
     if (err < 0)
         return Error_set(err);
 
-    Py_RETURN_NONE;
-}
-
-
-PyDoc_STRVAR(Reference_reload__doc__,
-  "reload()\n"
-  "\n"
-  "Reload the reference from the file-system.");
-
-PyObject *
-Reference_reload(Reference *self)
-{
-    int err;
-
-    CHECK_REFERENCE(self);
-
-    err = git_reference_reload(self->reference);
-    if (err < 0) {
-        self->reference = NULL;
-        return Error_set(err);
-    }
-
+    self->reference = new_reference;
     Py_RETURN_NONE;
 }
 
@@ -214,13 +180,8 @@ Reference_resolve(Reference *self, PyObject *args)
 
     CHECK_REFERENCE(self);
 
-    /* Direct: reload */
+    /* Direct: return myself */
     if (git_reference_type(self->reference) == GIT_REF_OID) {
-        err = git_reference_reload(self->reference);
-        if (err < 0) {
-            self->reference = NULL;
-            return Error_set(err);
-        }
         Py_INCREF(self);
         return (PyObject *)self;
     }
@@ -263,6 +224,7 @@ Reference_target__set__(Reference *self, PyObject *py_name)
 {
     char *c_name;
     int err;
+    git_reference *new_ref;
 
     CHECK_REFERENCE_INT(self);
 
@@ -272,13 +234,15 @@ Reference_target__set__(Reference *self, PyObject *py_name)
         return -1;
 
     /* Set the new target */
-    err = git_reference_symbolic_set_target(self->reference, c_name);
+    err = git_reference_symbolic_set_target(&new_ref, self->reference, c_name);
     free(c_name);
     if (err < 0) {
         Error_set(err);
         return -1;
     }
 
+    git_reference_free(self->reference);
+    self->reference = new_ref;
     return 0;
 }
 
@@ -320,6 +284,7 @@ Reference_oid__set__(Reference *self, PyObject *py_hex)
 {
     git_oid oid;
     int err;
+    git_reference *new_ref;
 
     CHECK_REFERENCE_INT(self);
 
@@ -332,12 +297,14 @@ Reference_oid__set__(Reference *self, PyObject *py_hex)
     }
 
     /* Set the oid */
-    err = git_reference_set_target(self->reference, &oid);
+    err = git_reference_set_target(&new_ref, self->reference, &oid);
     if (err < 0) {
         Error_set(err);
         return -1;
     }
 
+    git_reference_free(self->reference);
+    self->reference = new_ref;
     return 0;
 }
 
@@ -366,7 +333,7 @@ Reference_hex__get__(Reference *self)
 
 
 PyDoc_STRVAR(Reference_type__doc__,
-  "Type (GIT_REF_OID, GIT_REF_SYMBOLIC or GIT_REF_PACKED).");
+  "Type (GIT_REF_OID or GIT_REF_SYMBOLIC).");
 
 PyObject *
 Reference_type__get__(Reference *self)
@@ -375,7 +342,7 @@ Reference_type__get__(Reference *self)
 
     CHECK_REFERENCE(self);
     c_type = git_reference_type(self->reference);
-    return PyInt_FromLong(c_type);
+    return PyLong_FromLong(c_type);
 }
 
 
@@ -392,25 +359,31 @@ Reference_log(Reference *self)
     CHECK_REFERENCE(self);
 
     iter = PyObject_New(RefLogIter, &RefLogIterType);
-    if (iter) {
-        iter->reference = self;
+    if (iter != NULL) {
         git_reflog_read(&iter->reflog, self->reference);
         iter->size = git_reflog_entrycount(iter->reflog);
         iter->i = 0;
-
-        Py_INCREF(self);
-        Py_INCREF(iter);
     }
     return (PyObject*)iter;
 }
 
+
+PyDoc_STRVAR(RefLogEntry_committer__doc__, "Committer.");
+
+PyObject *
+RefLogEntry_committer__get__(RefLogEntry *self)
+{
+    return build_signature((Object*) self, self->signature, "utf-8");
+}
+
+
 static int
 RefLogEntry_init(RefLogEntry *self, PyObject *args, PyObject *kwds)
 {
-    self->oid_old = Py_None;
-    self->oid_new = Py_None;
-    self->message = "";
-    self->committer = Py_None;
+    self->oid_old   = NULL;
+    self->oid_new   = NULL;
+    self->message   = NULL;
+    self->signature = NULL;
 
     return 0;
 }
@@ -419,18 +392,22 @@ RefLogEntry_init(RefLogEntry *self, PyObject *args, PyObject *kwds)
 static void
 RefLogEntry_dealloc(RefLogEntry *self)
 {
-    Py_XDECREF(self->oid_old);
-    Py_XDECREF(self->oid_new);
-    Py_XDECREF(self->committer);
+    free(self->oid_old);
+    free(self->oid_new);
     free(self->message);
+    git_signature_free(self->signature);
     PyObject_Del(self);
 }
 
 PyMemberDef RefLogEntry_members[] = {
-    MEMBER(RefLogEntry, oid_new, T_OBJECT, "New oid."),
-    MEMBER(RefLogEntry, oid_old, T_OBJECT, "Old oid."),
+    MEMBER(RefLogEntry, oid_new, T_STRING, "New oid."),
+    MEMBER(RefLogEntry, oid_old, T_STRING, "Old oid."),
     MEMBER(RefLogEntry, message, T_STRING, "Message."),
-    MEMBER(RefLogEntry, committer, T_OBJECT, "Committer."),
+    {NULL}
+};
+
+PyGetSetDef RefLogEntry_getseters[] = {
+    GETTER(RefLogEntry, committer),
     {NULL}
 };
 
@@ -467,7 +444,7 @@ PyTypeObject RefLogEntryType = {
     0,                                         /* tp_iternext       */
     0,                                         /* tp_methods        */
     RefLogEntry_members,                       /* tp_members        */
-    0,                                         /* tp_getset         */
+    RefLogEntry_getseters,                     /* tp_getset         */
     0,                                         /* tp_base           */
     0,                                         /* tp_dict           */
     0,                                         /* tp_descr_get      */
@@ -481,7 +458,6 @@ PyTypeObject RefLogEntryType = {
 PyMethodDef Reference_methods[] = {
     METHOD(Reference, delete, METH_NOARGS),
     METHOD(Reference, rename, METH_O),
-    METHOD(Reference, reload, METH_NOARGS),
     METHOD(Reference, resolve, METH_NOARGS),
     METHOD(Reference, log, METH_NOARGS),
     {NULL}

@@ -42,8 +42,8 @@ import pygit2
 from . import utils
 
 
-HEAD_SHA  = '056e626e51b1fc1ee2182800e399ed8d84c8f082'
-PARENT_SHA = 'ccca47fbb26183e71a7a46d165299b84e2e6c0b3'  # HEAD^
+HEAD_SHA = '784855caf26449a1914d2cf62d12b9374d76ae78'
+PARENT_SHA = 'f5e5aa4e36ab0fe62ee1ccc6eb8f79b866863b87'  # HEAD^
 A_HEX_SHA = 'af431f20fc541ed6d5afede3e2dc7160f6f01f16'
 A_BIN_SHA = binascii.unhexlify(A_HEX_SHA.encode('ascii'))
 
@@ -70,14 +70,14 @@ class RepositoryTest(utils.BareRepoTestCase):
         ab = self.repo.read(A_BIN_SHA)
         a = self.repo.read(A_HEX_SHA)
         self.assertEqual(ab, a)
-        self.assertEqual((GIT_OBJ_BLOB, 'a contents\n'), a)
+        self.assertEqual((GIT_OBJ_BLOB, b'a contents\n'), a)
 
         a2 = self.repo.read('7f129fd57e31e935c6d60a0c794efe4e6927664b')
-        self.assertEqual((GIT_OBJ_BLOB, 'a contents 2\n'), a2)
+        self.assertEqual((GIT_OBJ_BLOB, b'a contents 2\n'), a2)
 
         a_hex_prefix = A_HEX_SHA[:4]
         a3 = self.repo.read(a_hex_prefix)
-        self.assertEqual((GIT_OBJ_BLOB, 'a contents\n'), a3)
+        self.assertEqual((GIT_OBJ_BLOB, b'a contents\n'), a3)
 
     def test_write(self):
         data = b"hello world"

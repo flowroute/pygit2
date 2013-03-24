@@ -28,6 +28,7 @@
 """Tests for Remote objects."""
 
 
+import unittest
 import pygit2
 from . import utils
 
@@ -35,8 +36,8 @@ REMOTE_NAME = 'origin'
 REMOTE_URL = 'git://github.com/libgit2/pygit2.git'
 REMOTE_FETCHSPEC_SRC = 'refs/heads/*'
 REMOTE_FETCHSPEC_DST = 'refs/remotes/origin/*'
-REMOTE_REPO_OBJECTS = 19
-REMOTE_REPO_BYTES = 1586
+REMOTE_REPO_OBJECTS = 30
+REMOTE_REPO_BYTES = 2758
 
 class RepositoryTest(utils.RepoTestCase):
     def test_remote_create(self):
@@ -104,3 +105,7 @@ class EmptyRepositoryTest(utils.EmptyRepoTestCase):
         self.assertEqual(stats['received_bytes'], REMOTE_REPO_BYTES)
         self.assertEqual(stats['indexed_objects'], REMOTE_REPO_OBJECTS)
         self.assertEqual(stats['received_objects'], REMOTE_REPO_OBJECTS)
+
+
+if __name__ == '__main__':
+    unittest.main()

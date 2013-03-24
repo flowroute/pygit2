@@ -32,41 +32,95 @@
 #include <Python.h>
 #include <git2.h>
 
-/* Python objects */
+/*
+ * Python objects
+ *
+ **/
+
+/* git_repository */
 typedef struct {
     PyObject_HEAD
     git_repository *repo;
-    PyObject *index; /* It will be None for a bare repository */
-    PyObject *config;
+    PyObject *index;  /* It will be None for a bare repository */
+    PyObject *config; /* It will be None for a bare repository */
 } Repository;
 
-/* The structs for some of the object subtypes are identical except for
- * the type of their object pointers. */
-#define OBJECT_STRUCT(_name, _ptr_type, _ptr_name) \
+
+#define SIMPLE_TYPE(_name, _ptr_type, _ptr_name) \
         typedef struct {\
             PyObject_HEAD\
             Repository *repo;\
             _ptr_type *_ptr_name;\
         } _name;
 
-OBJECT_STRUCT(Object, git_object, obj)
-OBJECT_STRUCT(Commit, git_commit, commit)
-OBJECT_STRUCT(Tree, git_tree, tree)
-OBJECT_STRUCT(TreeBuilder, git_treebuilder, bld)
-OBJECT_STRUCT(Blob, git_blob, blob)
-OBJECT_STRUCT(Tag, git_tag, tag)
-OBJECT_STRUCT(Index, git_index, index)
-OBJECT_STRUCT(Walker, git_revwalk, walk)
-OBJECT_STRUCT(Config, git_config, config)
-OBJECT_STRUCT(Remote, git_remote, remote)
+
+/* git object types
+ *
+ * The structs for some of the object subtypes are identical except for
+ * the type of their object pointers. */
+SIMPLE_TYPE(Object, git_object, obj)
+SIMPLE_TYPE(Commit, git_commit, commit)
+SIMPLE_TYPE(Tree, git_tree, tree)
+SIMPLE_TYPE(Blob, git_blob, blob)
+SIMPLE_TYPE(Tag, git_tag, tag)
+
+
+/* git_config */
+typedef struct {
+    PyObject_HEAD
+    git_config* config;
+} Config;
+
+
+/* git_note */
+typedef struct {
+    PyObject_HEAD
+    Repository *repo;
+    git_note *note;
+    char* annotated_id;
+} Note;
 
 typedef struct {
     PyObject_HEAD
     Repository *repo;
-    git_diff_list *diff;
-    PyObject *diff_changes;
-} Diff;
+    git_note_iterator* iter;
+    char* ref;
+} NoteIter;
 
+
+/* git _diff */
+SIMPLE_TYPE(Diff, git_diff_list, list)
+
+typedef struct {
+    PyObject_HEAD
+    Diff* diff;
+    size_t i;
+    size_t n;
+} DiffIter;
+
+typedef struct {
+    PyObject_HEAD
+    PyObject* hunks;
+    const char * old_file_path;
+    const char * new_file_path;
+    char* old_oid;
+    char* new_oid;
+    unsigned status;
+    unsigned similarity;
+} Patch;
+
+typedef struct {
+    PyObject_HEAD
+    PyObject* lines;
+    int old_start;
+    int old_lines;
+    int new_start;
+    int new_lines;
+} Hunk;
+
+
+/* git_tree_walk , git_treebuilder*/
+SIMPLE_TYPE(TreeBuilder, git_treebuilder, bld)
 
 typedef struct {
     PyObject_HEAD
@@ -76,25 +130,13 @@ typedef struct {
 
 typedef struct {
     PyObject_HEAD
-    char *header;
-    int old_start;
-    int old_lines;
-    PyObject *old_oid;
-    int old_mode;
-    char* old_file;
-    int new_start;
-    int new_lines;
-    PyObject *new_oid;
-    int new_mode;
-    char* new_file;
-    PyObject *data;
-} Hunk;
-
-typedef struct {
-    PyObject_HEAD
     Tree *owner;
     int i;
 } TreeIter;
+
+
+/* git_index */
+SIMPLE_TYPE(Index, git_index, index)
 
 typedef struct {
     PyObject_HEAD
@@ -107,6 +149,10 @@ typedef struct {
     int i;
 } IndexIter;
 
+
+/* git_reference, git_reflog */
+SIMPLE_TYPE(Walker, git_revwalk, walk)
+
 typedef struct {
     PyObject_HEAD
     git_reference *reference;
@@ -114,27 +160,31 @@ typedef struct {
 
 typedef struct {
     PyObject_HEAD
-    PyObject *oid_old;
-    PyObject *oid_new;
-    PyObject *committer;
+    git_signature *signature;
+    char *oid_old;
+    char *oid_new;
     char *message;
 } RefLogEntry;
 
 typedef struct {
     PyObject_HEAD
-    Reference *reference;
     git_reflog *reflog;
     int i;
     int size;
 } RefLogIter;
 
 
+/* git_signature */
 typedef struct {
     PyObject_HEAD
     Object *obj;
     const git_signature *signature;
     const char *encoding;
 } Signature;
+
+
+/* git_remote */
+SIMPLE_TYPE(Remote, git_remote, remote)
 
 
 PyObject*

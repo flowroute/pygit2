@@ -40,192 +40,191 @@ extern PyTypeObject IndexType;
 extern PyTypeObject DiffType;
 extern PyTypeObject HunkType;
 
-static int diff_data_cb(
-  const git_diff_delta *delta,
-  const git_diff_range *range,
-  char line_origin,
-  const char *content,
-  size_t content_len,
-  void *cb_data)
+PyTypeObject PatchType;
+
+PyObject*
+diff_get_patch_byindex(git_diff_list* list, size_t idx)
 {
-    PyObject *hunks, *data;
-    Hunk *hunk;
-    Py_ssize_t size;
+    const git_diff_delta* delta;
+    const git_diff_range* range;
+    git_diff_patch* patch = NULL;
+    size_t i, j, hunk_amounts, lines_in_hunk, line_len, header_len;
+    const char* line, *header;
+    int err;
+    Hunk *py_hunk = NULL;
+    Patch *py_patch = NULL;
 
-    hunks = PyDict_GetItemString(cb_data, "hunks");
-    if (hunks == NULL)
-        return -1;
+    err = git_diff_get_patch(&patch, &delta, list, idx);
+    if (err < 0)
+        return Error_set(err);
 
-    size = PyList_Size(hunks);
-    hunk = (Hunk *)PyList_GetItem(hunks, size - 1);
-    if (hunk == NULL)
-        return -1;
+    py_patch = PyObject_New(Patch, &PatchType);
+    if (py_patch != NULL) {
+        py_patch->old_file_path = delta->old_file.path;
+        py_patch->new_file_path = delta->new_file.path;
+        py_patch->status = delta->status;
+        py_patch->similarity = delta->similarity;
+        py_patch->old_oid = git_oid_allocfmt(&delta->old_file.oid);
+        py_patch->new_oid = git_oid_allocfmt(&delta->new_file.oid);
 
-    data = Py_BuildValue("(s#,i)",
-        content, content_len,
-        line_origin
-    );
-    PyList_Append(hunk->data, data);
-    Py_DECREF(data);
 
-    return 0;
+        hunk_amounts = git_diff_patch_num_hunks(patch);
+        py_patch->hunks = PyList_New(hunk_amounts);
+        for (i=0; i < hunk_amounts; ++i) {
+            err = git_diff_patch_get_hunk(&range, &header, &header_len,
+                      &lines_in_hunk, patch, i);
+
+            if (err < 0)
+                goto cleanup;
+
+            py_hunk = PyObject_New(Hunk, &HunkType);
+            if (py_hunk != NULL) {
+                py_hunk->old_start = range->old_start;
+                py_hunk->old_lines = range->old_lines;
+                py_hunk->new_start = range->new_start;
+                py_hunk->new_lines = range->new_lines;
+
+                py_hunk->lines = PyList_New(lines_in_hunk + 1);
+                PyList_SetItem(py_hunk->lines, 0,
+                    to_unicode_n(header, header_len, NULL, NULL));
+                for (j=1; j < lines_in_hunk + 1; ++j) {
+                    err = git_diff_patch_get_line_in_hunk(NULL, &line,
+                              &line_len, NULL, NULL, patch, i, j - 1);
+
+                    if (err < 0)
+                      goto cleanup;
+
+                    PyList_SetItem(py_hunk->lines, j,
+                        to_unicode_n(line, line_len, NULL, NULL));
+                }
+
+                PyList_SetItem((PyObject*) py_patch->hunks, i,
+                    (PyObject*) py_hunk);
+            }
+        }
+    }
+
+cleanup:
+    git_diff_patch_free(patch);
+
+    return (err < 0) ? Error_set(err) : (PyObject*) py_patch;
 }
 
-static int diff_hunk_cb(
-  const git_diff_delta *delta,
-  const git_diff_range *range,
-  const char *header,
-  size_t header_len,
-  void *cb_data)
+static void
+Patch_dealloc(Patch *self)
 {
-    PyObject *hunks;
-    Hunk *hunk;
-    int len;
-    char* old_path = NULL, *new_path = NULL;
-    char oid[GIT_OID_HEXSZ];
+    Py_CLEAR(self->hunks);
+    free(self->old_oid);
+    free(self->new_oid);
+    // we do not have to free old_file_path and new_file_path, they will
+    // be freed by git_diff_list_free in Diff_dealloc
+    PyObject_Del(self);
+}
 
-
-    hunks = PyDict_GetItemString(cb_data, "hunks");
-    if (hunks == NULL) {
-        hunks = PyList_New(0);
-        PyDict_SetItemString(cb_data, "hunks", hunks);
-        Py_DECREF(hunks);
-    }
-
-    hunk = (Hunk*)PyType_GenericNew(&HunkType, NULL, NULL);
-    if (hunk == NULL)
-        return -1;
-
-    hunk->old_start = range->old_start;
-    hunk->old_lines = range->old_lines;
-    hunk->new_start = range->new_start;
-    hunk->new_lines = range->new_lines;
-
-    hunk->old_mode = delta->old_file.mode;
-    hunk->new_mode = delta->new_file.mode;
-
-    git_oid_fmt(oid, &delta->old_file.oid);
-    hunk->old_oid = PyUnicode_FromStringAndSize(oid, GIT_OID_HEXSZ);
-    git_oid_fmt(oid, &delta->new_file.oid);
-    hunk->new_oid = PyUnicode_FromStringAndSize(oid, GIT_OID_HEXSZ);
-
-    if (header) {
-        hunk->header = malloc(header_len+1);
-
-        if (hunk->header == NULL)
-            return -1;
-
-        memcpy(hunk->header, header, header_len);
-        hunk->header[header_len] = '\0';
-    }
-
-    if (delta->old_file.path != NULL) {
-        len = strlen(delta->old_file.path) + 1;
-        old_path = malloc(sizeof(char) * len);
-        if (old_path == NULL) {
-            free(hunk->header);
-            hunk->header = NULL;
-            return -1;
-        }
-
-        memcpy(old_path, delta->old_file.path, len);
-        hunk->old_file = old_path;
-    } else {
-        hunk->old_file = "";
-    }
-
-    if (delta->new_file.path != NULL) {
-        len = strlen(delta->new_file.path) + 1;
-        new_path = malloc(sizeof(char) * len);
-        if (new_path == NULL) {
-            free(hunk->header);
-            free(old_path);
-            return -1;
-        }
-
-        memcpy(new_path, delta->new_file.path, len);
-        hunk->new_file = new_path;
-    } else {
-        hunk->new_file = "";
-    }
-
-    if (hunk->data == NULL)
-        hunk->data = PyList_New(0);
-
-    if (PyList_Append(hunks, (PyObject *)hunk) == 0) {
-        Py_DECREF(hunk);
-    }
-    else {
-        return -1;
-    }
-
-    return 0;
+PyMemberDef Patch_members[] = {
+    MEMBER(Patch, old_file_path, T_STRING, "old file path"),
+    MEMBER(Patch, new_file_path, T_STRING, "new file path"),
+    MEMBER(Patch, old_oid, T_STRING, "old oid"),
+    MEMBER(Patch, new_oid, T_STRING, "new oid"),
+    MEMBER(Patch, status, T_INT, "status"),
+    MEMBER(Patch, similarity, T_INT, "similarity"),
+    MEMBER(Patch, hunks, T_OBJECT, "hunks"),
+    {NULL}
 };
 
-static int
-diff_file_cb(const git_diff_delta *delta, float progress, void *cb_data)
-{
-    PyObject *files, *file;
+PyDoc_STRVAR(Patch__doc__, "Diff patch object.");
 
-    if (delta->old_file.path != NULL && delta->new_file.path != NULL) {
-        files = PyDict_GetItemString(cb_data, "files");
+PyTypeObject PatchType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "_pygit2.Patch",                           /* tp_name           */
+    sizeof(Patch),                             /* tp_basicsize      */
+    0,                                         /* tp_itemsize       */
+    (destructor)Patch_dealloc,                 /* tp_dealloc        */
+    0,                                         /* tp_print          */
+    0,                                         /* tp_getattr        */
+    0,                                         /* tp_setattr        */
+    0,                                         /* tp_compare        */
+    0,                                         /* tp_repr           */
+    0,                                         /* tp_as_number      */
+    0,                                         /* tp_as_sequence    */
+    0,                                         /* tp_as_mapping     */
+    0,                                         /* tp_hash           */
+    0,                                         /* tp_call           */
+    0,                                         /* tp_str            */
+    0,                                         /* tp_getattro       */
+    0,                                         /* tp_setattro       */
+    0,                                         /* tp_as_buffer      */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Patch__doc__,                              /* tp_doc            */
+    0,                                         /* tp_traverse       */
+    0,                                         /* tp_clear          */
+    0,                                         /* tp_richcompare    */
+    0,                                         /* tp_weaklistoffset */
+    0,                                         /* tp_iter           */
+    0,                                         /* tp_iternext       */
+    0,                                         /* tp_methods        */
+    Patch_members,                             /* tp_members        */
+    0,                                         /* tp_getset         */
+    0,                                         /* tp_base           */
+    0,                                         /* tp_dict           */
+    0,                                         /* tp_descr_get      */
+    0,                                         /* tp_descr_set      */
+    0,                                         /* tp_dictoffset     */
+    0,                                         /* tp_init           */
+    0,                                         /* tp_alloc          */
+    0,                                         /* tp_new            */
+};
 
-        if (files == NULL) {
-            files = PyList_New(0);
-            PyDict_SetItemString(cb_data, "files", files);
-            Py_DECREF(files);
-        }
-
-        file = Py_BuildValue("(s,s,i,i)",
-            delta->old_file.path,
-            delta->new_file.path,
-            delta->status,
-            delta->similarity
-        );
-
-        /* If success */
-        if (PyList_Append(files, file) == 0)
-            Py_DECREF(file);
-    }
-
-    return 0;
-}
-
-
-PyDoc_STRVAR(Diff_changes__doc__, "Raw changes.");
 
 PyObject *
-Diff_changes__get__(Diff *self)
+DiffIter_iternext(DiffIter *self)
 {
+    if (self->i < self->n)
+        return diff_get_patch_byindex(self->diff->list, self->i++);
 
-    if (self->diff_changes == NULL) {
-        self->diff_changes = PyDict_New();
-
-        git_diff_foreach(
-            self->diff,
-            &diff_file_cb,
-            &diff_hunk_cb,
-            &diff_data_cb,
-            self->diff_changes
-        );
-    }
-
-    return PyDict_Copy(self->diff_changes);
+    PyErr_SetNone(PyExc_StopIteration);
+    return NULL;
 }
 
-static int diff_print_cb(
-    const git_diff_delta *delta,
-    const git_diff_range *range,
-    char usage,
-    const char *line,
-    size_t line_len,
-    void *cb_data)
+void
+DiffIter_dealloc(DiffIter *self)
 {
-    PyObject *data = PyBytes_FromStringAndSize(line, line_len);
-    PyBytes_ConcatAndDel((PyObject **)cb_data, data);
-
-    return 0;
+    Py_CLEAR(self->diff);
+    PyObject_Del(self);
 }
+
+
+PyDoc_STRVAR(DiffIter__doc__, "Diff iterator object.");
+
+PyTypeObject DiffIterType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "_pygit2.DiffIter",                       /* tp_name           */
+    sizeof(DiffIter),                         /* tp_basicsize      */
+    0,                                         /* tp_itemsize       */
+    (destructor)DiffIter_dealloc,             /* tp_dealloc        */
+    0,                                         /* tp_print          */
+    0,                                         /* tp_getattr        */
+    0,                                         /* tp_setattr        */
+    0,                                         /* tp_compare        */
+    0,                                         /* tp_repr           */
+    0,                                         /* tp_as_number      */
+    0,                                         /* tp_as_sequence    */
+    0,                                         /* tp_as_mapping     */
+    0,                                         /* tp_hash           */
+    0,                                         /* tp_call           */
+    0,                                         /* tp_str            */
+    0,                                         /* tp_getattro       */
+    0,                                         /* tp_setattro       */
+    0,                                         /* tp_as_buffer      */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    DiffIter__doc__,                           /* tp_doc            */
+    0,                                         /* tp_traverse       */
+    0,                                         /* tp_clear          */
+    0,                                         /* tp_richcompare    */
+    0,                                         /* tp_weaklistoffset */
+    PyObject_SelfIter,                         /* tp_iter           */
+   (iternextfunc) DiffIter_iternext,           /* tp_iternext       */
+};
 
 
 PyDoc_STRVAR(Diff_patch__doc__, "Patch.");
@@ -233,69 +232,58 @@ PyDoc_STRVAR(Diff_patch__doc__, "Patch.");
 PyObject *
 Diff_patch__get__(Diff *self)
 {
-    PyObject *patch = PyBytes_FromString("");
+    const git_diff_delta* delta;
+    git_diff_patch* patch;
+    char **strings = NULL;
+    char *buffer = NULL;
+    int err = GIT_ERROR;
+    size_t i, len, num;
+    PyObject *py_patch = NULL;
 
-    git_diff_print_patch(self->diff, &diff_print_cb, (void*) &patch);
+    num = git_diff_num_deltas(self->list);
+    MALLOC(strings, num * sizeof(char*), cleanup);
 
-    return patch;
-}
+    for (i = 0, len = 1; i < num ; ++i) {
+        err = git_diff_get_patch(&patch, &delta, self->list, i);
+        if (err < 0)
+            goto cleanup;
 
-static int
-Hunk_init(Hunk *self, PyObject *args, PyObject *kwds)
-{
-    self->header = NULL;
+        err = git_diff_patch_to_str(&(strings[i]), patch);
+        if (err < 0)
+            goto cleanup;
 
-    self->old_file = NULL;
-    self->old_start = 0;
-    self->old_lines = 0;
-
-    self->new_file = NULL;
-    self->new_start = 0;
-    self->new_lines = 0;
-
-    self->old_oid = NULL;
-    self->new_oid = NULL;
-
-    self->data = PyList_New(0);
-    if (self->data == NULL) {
-        Py_XDECREF(self);
-        return -1;
+        len += strlen(strings[i]);
+        git_diff_patch_free(patch);
     }
 
-    return 0;
+    CALLOC(buffer, (len + 1), sizeof(char), cleanup);
+    for (i = 0; i < num; ++i) {
+        strcat(buffer, strings[i]);
+        free(strings[i]);
+    }
+    free(strings);
+
+    py_patch = to_unicode(buffer, NULL, NULL);
+    free(buffer);
+
+cleanup:
+    return (err < 0) ? Error_set(err) : py_patch;
 }
+
 
 static void
 Hunk_dealloc(Hunk *self)
 {
-    if (self->header != NULL) {
-        free(self->header);
-    }
-    if (self->new_file != NULL) {
-        free(self->new_file);
-    }
-    if (self->old_file != NULL) {
-        free(self->old_file);
-    }
-    Py_XDECREF(self->old_oid);
-    Py_XDECREF(self->new_oid);
-    Py_XDECREF(self->data);
+    Py_CLEAR(self->lines);
     PyObject_Del(self);
 }
 
 PyMemberDef Hunk_members[] = {
-    MEMBER(Hunk, header, T_STRING, "Header."),
     MEMBER(Hunk, old_start, T_INT, "Old start."),
     MEMBER(Hunk, old_lines, T_INT, "Old lines."),
-    MEMBER(Hunk, old_mode, T_INT, "Old mode."),
-    MEMBER(Hunk, old_file, T_STRING, "Old file."),
-    MEMBER(Hunk, old_oid, T_OBJECT, "Old oid."),
     MEMBER(Hunk, new_start, T_INT, "New start."),
     MEMBER(Hunk, new_lines, T_INT, "New lines."),
-    MEMBER(Hunk, new_mode, T_INT, "New mode."),
-    MEMBER(Hunk, new_file, T_STRING, "New file."),
-    MEMBER(Hunk, new_oid, T_OBJECT, "New oid."),
-    MEMBER(Hunk, data, T_OBJECT, "Data."),
+    MEMBER(Hunk, lines, T_OBJECT, "Lines."),
     {NULL}
 };
 
@@ -338,7 +326,7 @@ PyTypeObject HunkType = {
     0,                                         /* tp_descr_get      */
     0,                                         /* tp_descr_set      */
     0,                                         /* tp_dictoffset     */
-    (initproc)Hunk_init,                       /* tp_init           */
+    0,                                         /* tp_init           */
     0,                                         /* tp_alloc          */
     0,                                         /* tp_new            */
 };
@@ -357,15 +345,14 @@ Diff_merge(Diff *self, PyObject *args)
 
     if (!PyArg_ParseTuple(args, "O!", &DiffType, &py_diff))
         return NULL;
+
     if (py_diff->repo->repo != self->repo->repo)
         return Error_set(GIT_ERROR);
 
-    err = git_diff_merge(self->diff, py_diff->diff);
+    err = git_diff_merge(self->list, py_diff->list);
     if (err < 0)
         return Error_set(err);
 
-    Py_XDECREF(self->diff_changes);
-    self->diff_changes = NULL;
     Py_RETURN_NONE;
 }
 
@@ -373,7 +360,7 @@ Diff_merge(Diff *self, PyObject *args)
 PyDoc_STRVAR(Diff_find_similar__doc__,
   "find_similar([flags])\n"
   "\n"
-  "Find renamed files in diff.");
+  "Find renamed files in diff and updates them in-place in the diff itself.");
 
 PyObject *
 Diff_find_similar(Diff *self, PyObject *args)
@@ -384,28 +371,59 @@ Diff_find_similar(Diff *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "|i", &opts.flags))
         return NULL;
 
-    err = git_diff_find_similar(self->diff, &opts);
+    err = git_diff_find_similar(self->list, &opts);
     if (err < 0)
         return Error_set(err);
 
-    Py_XDECREF(self->diff_changes);
-    self->diff_changes = NULL;
     Py_RETURN_NONE;
 }
+
+PyObject *
+Diff_iter(Diff *self)
+{
+    DiffIter *iter;
+
+    iter = PyObject_New(DiffIter, &DiffIterType);
+    if (iter != NULL) {
+        Py_INCREF(self);
+        iter->diff = self;
+        iter->i = 0;
+        iter->n = git_diff_num_deltas(self->list);
+    }
+    return (PyObject*)iter;
+}
+
+PyObject *
+Diff_getitem(Diff *self, PyObject *value)
+{
+    size_t i;
+
+    if (PyLong_Check(value) < 0)
+        return NULL;
+
+    i = PyLong_AsUnsignedLong(value);
+
+    return diff_get_patch_byindex(self->list, i);
+}
+
 
 static void
 Diff_dealloc(Diff *self)
 {
-    git_diff_list_free(self->diff);
-    Py_XDECREF(self->repo);
-    Py_XDECREF(self->diff_changes);
+    git_diff_list_free(self->list);
+    Py_CLEAR(self->repo);
     PyObject_Del(self);
 }
 
 PyGetSetDef Diff_getseters[] = {
-    GETTER(Diff, changes),
     GETTER(Diff, patch),
     {NULL}
+};
+
+PyMappingMethods Diff_as_mapping = {
+    0,                               /* mp_length */
+    (binaryfunc)Diff_getitem,        /* mp_subscript */
+    0,                               /* mp_ass_subscript */
 };
 
 static PyMethodDef Diff_methods[] = {
@@ -430,7 +448,7 @@ PyTypeObject DiffType = {
     0,                                         /* tp_repr           */
     0,                                         /* tp_as_number      */
     0,                                         /* tp_as_sequence    */
-    0,                                         /* tp_as_mapping     */
+    &Diff_as_mapping,                          /* tp_as_mapping     */
     0,                                         /* tp_hash           */
     0,                                         /* tp_call           */
     0,                                         /* tp_str            */
@@ -443,7 +461,7 @@ PyTypeObject DiffType = {
     0,                                         /* tp_clear          */
     0,                                         /* tp_richcompare    */
     0,                                         /* tp_weaklistoffset */
-    0,                                         /* tp_iter           */
+    (getiterfunc)Diff_iter,                    /* tp_iter           */
     0,                                         /* tp_iternext       */
     Diff_methods,                              /* tp_methods        */
     0,                                         /* tp_members        */

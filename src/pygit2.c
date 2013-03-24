@@ -41,6 +41,8 @@ extern PyTypeObject RepositoryType;
 extern PyTypeObject ObjectType;
 extern PyTypeObject CommitType;
 extern PyTypeObject DiffType;
+extern PyTypeObject DiffIterType;
+extern PyTypeObject PatchType;
 extern PyTypeObject HunkType;
 extern PyTypeObject TreeType;
 extern PyTypeObject TreeBuilderType;
@@ -58,40 +60,32 @@ extern PyTypeObject RefLogIterType;
 extern PyTypeObject RefLogEntryType;
 extern PyTypeObject SignatureType;
 extern PyTypeObject RemoteType;
+extern PyTypeObject NoteType;
+extern PyTypeObject NoteIterType;
 
 
 
 PyDoc_STRVAR(init_repository__doc__,
-  "init_repository(path, bare=False) -> Repository\n"
+  "init_repository(path, bare)\n"
   "\n"
   "Creates a new Git repository in the given path.");
 
 PyObject *
-init_repository(PyObject *self, PyObject *args, PyObject *kw) {
+init_repository(PyObject *self, PyObject *args) {
     git_repository *repo;
-    Repository *py_repo;
     const char *path;
-    unsigned int bare = 0;
+    unsigned int bare;
     int err;
-    static char * kwlist[] = {"path", "bare", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kw, "s|I", kwlist, &path, &bare))
+    if (!PyArg_ParseTuple(args, "sI", &path, &bare))
         return NULL;
 
     err = git_repository_init(&repo, path, bare);
     if (err < 0)
         return Error_set_str(err, path);
 
-    py_repo = PyObject_GC_New(Repository, &RepositoryType);
-    if (py_repo) {
-        py_repo->repo = repo;
-        py_repo->index = NULL;
-        PyObject_GC_Track(py_repo);
-        return (PyObject*)py_repo;
-    }
-
     git_repository_free(repo);
-    return NULL;
+    Py_RETURN_NONE;
 };
 
 
@@ -168,8 +162,7 @@ hash(PyObject *self, PyObject *args)
 
 
 PyMethodDef module_methods[] = {
-    {"init_repository", init_repository, METH_VARARGS|METH_KEYWORDS,
-     init_repository__doc__},
+    {"init_repository", init_repository, METH_VARARGS, init_repository__doc__},
     {"discover_repository", discover_repository, METH_VARARGS,
      discover_repository__doc__},
     {"hashfile", hashfile, METH_VARARGS, hashfile__doc__},
@@ -208,6 +201,10 @@ moduleinit(PyObject* m)
 
     if (PyType_Ready(&DiffType) < 0)
         return NULL;
+    if (PyType_Ready(&DiffIterType) < 0)
+        return NULL;
+    if (PyType_Ready(&PatchType) < 0)
+        return NULL;
     if (PyType_Ready(&HunkType) < 0)
         return NULL;
 
@@ -239,6 +236,11 @@ moduleinit(PyObject* m)
         return NULL;
 
     if (PyType_Ready(&RemoteType) < 0)
+        return NULL;
+
+    if (PyType_Ready(&NoteType) < 0)
+        return NULL;
+    if (PyType_Ready(&NoteIterType) < 0)
         return NULL;
 
     Py_INCREF(GitError);
@@ -286,6 +288,9 @@ moduleinit(PyObject* m)
     Py_INCREF(&RemoteType);
     PyModule_AddObject(m, "Remote", (PyObject *)&RemoteType);
 
+    Py_INCREF(&NoteType);
+    PyModule_AddObject(m, "Note", (PyObject *)&NoteType);
+
     PyModule_AddIntConstant(m, "GIT_OBJ_ANY", GIT_OBJ_ANY);
     PyModule_AddIntConstant(m, "GIT_OBJ_COMMIT", GIT_OBJ_COMMIT);
     PyModule_AddIntConstant(m, "GIT_OBJ_TREE", GIT_OBJ_TREE);
@@ -295,9 +300,9 @@ moduleinit(PyObject* m)
     PyModule_AddIntConstant(m, "GIT_SORT_TOPOLOGICAL", GIT_SORT_TOPOLOGICAL);
     PyModule_AddIntConstant(m, "GIT_SORT_TIME", GIT_SORT_TIME);
     PyModule_AddIntConstant(m, "GIT_SORT_REVERSE", GIT_SORT_REVERSE);
+    PyModule_AddIntConstant(m, "GIT_REF_INVALID", GIT_REF_INVALID);
     PyModule_AddIntConstant(m, "GIT_REF_OID", GIT_REF_OID);
     PyModule_AddIntConstant(m, "GIT_REF_SYMBOLIC", GIT_REF_SYMBOLIC);
-    PyModule_AddIntConstant(m, "GIT_REF_PACKED", GIT_REF_PACKED);
     PyModule_AddIntConstant(m, "GIT_REF_LISTALL", GIT_REF_LISTALL);
 
     /* Git status flags */
@@ -353,13 +358,6 @@ moduleinit(PyObject* m)
     /* --break-rewrites=/M */
     PyModule_AddIntConstant(m, "GIT_DIFF_FIND_AND_BREAK_REWRITES",
                             GIT_DIFF_FIND_AND_BREAK_REWRITES);
-
-    /* Flags for diffed files */
-    PyModule_AddIntConstant(m, "GIT_DIFF_FLAG_BINARY", GIT_DIFF_FLAG_BINARY);
-    PyModule_AddIntConstant(m, "GIT_DIFF_FLAG_NOT_BINARY",
-                            GIT_DIFF_FLAG_NOT_BINARY);
-    PyModule_AddIntConstant(m, "GIT_DIFF_FLAG_VALID_OID",
-                            GIT_DIFF_FLAG_VALID_OID);
 
     /* Flags for diff deltas */
     PyModule_AddIntConstant(m, "GIT_DELTA_UNMODIFIED", GIT_DELTA_UNMODIFIED);
