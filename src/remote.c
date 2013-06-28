@@ -125,60 +125,6 @@ Remote_url__set__(Remote *self, PyObject* py_url)
 }
 
 
-PyDoc_STRVAR(Remote_fetchspec__doc__,
-  "= (source:str, destination:str)\n"
-  "\n"
-  "Name of the remote source and destination fetch refspecs\n");
-
-
-PyObject *
-Remote_fetchspec__get__(Remote *self)
-{
-    PyObject* py_tuple = NULL;
-    const git_refspec * refspec;
-
-    refspec = git_remote_fetchspec(self->remote);
-    if  (refspec != NULL) {
-        py_tuple = Py_BuildValue(
-            "(ss)",
-            git_refspec_src(refspec),
-            git_refspec_dst(refspec)
-        );
-
-        return py_tuple;
-    }
-
-    return Error_set(GIT_ENOTFOUND);
-}
-
-int
-Remote_fetchspec__set__(Remote *self, PyObject* py_tuple)
-{
-    int err;
-    size_t length = 0;
-    char* src = NULL, *dst = NULL, *buf = NULL;
-
-    if (!PyArg_ParseTuple(py_tuple, "ss", &src, &dst))
-        return -1;
-
-    /* length is strlen('+' + src + ':' + dst) and Null-Byte */
-    length = strlen(src) + strlen(dst) + 3;
-    buf = (char*) calloc(length, sizeof(char));
-    if (buf != NULL) {
-        sprintf(buf, "+%s:%s", src, dst);
-        err = git_remote_set_fetchspec(self->remote, buf);
-        free(buf);
-
-        if (err == GIT_OK)
-            return 0;
-
-        Error_set_exc(PyExc_ValueError);
-    }
-
-    return -1;
-}
-
-
 PyDoc_STRVAR(Remote_fetch__doc__,
   "fetch() -> {'indexed_objects': int, 'received_objects' : int,"
   "            'received_bytesa' : int}\n"
@@ -243,7 +189,6 @@ PyMethodDef Remote_methods[] = {
 PyGetSetDef Remote_getseters[] = {
     GETSET(Remote, name),
     GETSET(Remote, url),
-    GETSET(Remote, fetchspec),
     {NULL}
 };
 
