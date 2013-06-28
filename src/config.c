@@ -27,10 +27,10 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/utils.h>
-#include <pygit2/config.h>
+#include "error.h"
+#include "types.h"
+#include "utils.h"
+#include "config.h"
 
 extern PyTypeObject ConfigType;
 
@@ -60,7 +60,7 @@ Config_init(Config *self, PyObject *args, PyObject *kwds)
 
     if (kwds) {
         PyErr_SetString(PyExc_TypeError,
-                        "Repository takes no keyword arguments");
+                        "Config takes no keyword arguments");
         return -1;
     }
 
@@ -172,7 +172,7 @@ Config_contains(Config *self, PyObject *py_key) {
 PyObject *
 Config_getitem(Config *self, PyObject *py_key)
 {
-    long value_int;
+    int64_t value_int;
     int err, value_bool;
     const char *value_str;
     char *key;
@@ -187,7 +187,7 @@ Config_getitem(Config *self, PyObject *py_key)
         goto cleanup;
 
     if (git_config_parse_int64(&value_int, value_str) == 0)
-      py_value = PyLong_FromLong(value_int);
+      py_value = PyLong_FromLongLong(value_int);
     else if(git_config_parse_bool(&value_bool, value_str) == 0)
       py_value = PyBool_FromLong(value_bool);
     else

@@ -28,10 +28,10 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <structmember.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/utils.h>
-#include <pygit2/diff.h>
+#include "error.h"
+#include "types.h"
+#include "utils.h"
+#include "diff.h"
 
 extern PyObject *GitError;
 
@@ -43,6 +43,21 @@ extern PyTypeObject HunkType;
 PyTypeObject PatchType;
 
 PyObject*
+wrap_diff(git_diff_list *diff, Repository *repo)
+{
+    Diff *py_diff;
+
+    py_diff = PyObject_New(Diff, &DiffType);
+    if (py_diff) {
+        Py_INCREF(repo);
+        py_diff->repo = repo;
+        py_diff->list = diff;
+    }
+
+    return (PyObject*) py_diff;
+}
+
+PyObject*
 diff_get_patch_byindex(git_diff_list* list, size_t idx)
 {
     const git_diff_delta* delta;
@@ -50,9 +65,11 @@ diff_get_patch_byindex(git_diff_list* list, size_t idx)
     git_diff_patch* patch = NULL;
     size_t i, j, hunk_amounts, lines_in_hunk, line_len, header_len;
     const char* line, *header;
+    char line_origin;
     int err;
     Hunk *py_hunk = NULL;
     Patch *py_patch = NULL;
+    PyObject *py_line_origin=NULL, *py_line=NULL;
 
     err = git_diff_get_patch(&patch, &delta, list, idx);
     if (err < 0)
@@ -62,7 +79,7 @@ diff_get_patch_byindex(git_diff_list* list, size_t idx)
     if (py_patch != NULL) {
         py_patch->old_file_path = delta->old_file.path;
         py_patch->new_file_path = delta->new_file.path;
-        py_patch->status = delta->status;
+        py_patch->status = git_diff_status_char(delta->status);
         py_patch->similarity = delta->similarity;
         py_patch->old_oid = git_oid_allocfmt(&delta->old_file.oid);
         py_patch->new_oid = git_oid_allocfmt(&delta->new_file.oid);
@@ -84,18 +101,24 @@ diff_get_patch_byindex(git_diff_list* list, size_t idx)
                 py_hunk->new_start = range->new_start;
                 py_hunk->new_lines = range->new_lines;
 
-                py_hunk->lines = PyList_New(lines_in_hunk + 1);
-                PyList_SetItem(py_hunk->lines, 0,
-                    to_unicode_n(header, header_len, NULL, NULL));
-                for (j=1; j < lines_in_hunk + 1; ++j) {
-                    err = git_diff_patch_get_line_in_hunk(NULL, &line,
-                              &line_len, NULL, NULL, patch, i, j - 1);
+                py_hunk->lines = PyList_New(lines_in_hunk);
+                for (j=0; j < lines_in_hunk; ++j) {
+                    err = git_diff_patch_get_line_in_hunk(&line_origin,
+                              &line, &line_len, NULL, NULL, patch, i, j);
 
                     if (err < 0)
                       goto cleanup;
 
+                    py_line_origin = to_unicode_n(&line_origin, 1, NULL, NULL);
+                    py_line = to_unicode_n(line, line_len, NULL, NULL);
                     PyList_SetItem(py_hunk->lines, j,
-                        to_unicode_n(line, line_len, NULL, NULL));
+                        Py_BuildValue("OO",
+                            py_line_origin,
+                            py_line
+                        )
+                    );
+                    Py_DECREF(py_line_origin);
+                    Py_DECREF(py_line);
                 }
 
                 PyList_SetItem((PyObject*) py_patch->hunks, i,
@@ -126,7 +149,7 @@ PyMemberDef Patch_members[] = {
     MEMBER(Patch, new_file_path, T_STRING, "new file path"),
     MEMBER(Patch, old_oid, T_STRING, "old oid"),
     MEMBER(Patch, new_oid, T_STRING, "new oid"),
-    MEMBER(Patch, status, T_INT, "status"),
+    MEMBER(Patch, status, T_CHAR, "status"),
     MEMBER(Patch, similarity, T_INT, "similarity"),
     MEMBER(Patch, hunks, T_OBJECT, "hunks"),
     {NULL}
@@ -198,10 +221,10 @@ PyDoc_STRVAR(DiffIter__doc__, "Diff iterator object.");
 
 PyTypeObject DiffIterType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "_pygit2.DiffIter",                       /* tp_name           */
-    sizeof(DiffIter),                         /* tp_basicsize      */
+    "_pygit2.DiffIter",                        /* tp_name           */
+    sizeof(DiffIter),                          /* tp_basicsize      */
     0,                                         /* tp_itemsize       */
-    (destructor)DiffIter_dealloc,             /* tp_dealloc        */
+    (destructor)DiffIter_dealloc,              /* tp_dealloc        */
     0,                                         /* tp_print          */
     0,                                         /* tp_getattr        */
     0,                                         /* tp_setattr        */
@@ -223,11 +246,11 @@ PyTypeObject DiffIterType = {
     0,                                         /* tp_richcompare    */
     0,                                         /* tp_weaklistoffset */
     PyObject_SelfIter,                         /* tp_iter           */
-   (iternextfunc) DiffIter_iternext,           /* tp_iternext       */
+    (iternextfunc) DiffIter_iternext,          /* tp_iternext       */
 };
 
 
-PyDoc_STRVAR(Diff_patch__doc__, "Patch.");
+PyDoc_STRVAR(Diff_patch__doc__, "Patch diff string.");
 
 PyObject *
 Diff_patch__get__(Diff *self)

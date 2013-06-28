@@ -25,38 +25,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#ifndef INCLUDE_pygit2_branch_h
+#define INCLUDE_pygit2_branch_h
+
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include "error.h"
-#include "utils.h"
+#include <git2.h>
 
-extern PyTypeObject ReferenceType;
+PyObject* Branch_delete(Branch *self, PyObject *args);
+PyObject* Branch_is_head(Branch *self);
+PyObject* Branch_move(Branch *self, PyObject *args);
 
-/* py_str_to_c_str() returns a newly allocated C string holding
- * the string contained in the value argument. */
-char *
-py_str_to_c_str(PyObject *value, const char *encoding)
-{
-    char *c_str = NULL;
-    /* Case 1: byte string */
-    if (PyBytes_Check(value))
-        return strdup(PyBytes_AsString(value));
+PyObject* wrap_branch(git_reference *c_reference, Repository *repo);
 
-    /* Case 2: text string */
-    if (PyUnicode_Check(value)) {
-        if (encoding == NULL)
-            value = PyUnicode_AsUTF8String(value);
-        else
-            value = PyUnicode_AsEncodedString(value, encoding, "strict");
-        if (value == NULL)
-            return NULL;
-        c_str = strdup(PyBytes_AsString(value));
-        Py_DECREF(value);
-        return c_str;
-    }
-
-    /* Type error */
-    PyErr_Format(PyExc_TypeError, "unexpected %.200s",
-                 Py_TYPE(value)->tp_name);
-    return NULL;
-}
+#endif

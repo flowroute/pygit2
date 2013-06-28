@@ -25,22 +25,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef INCLUDE_pygit2_reference_h
-#define INCLUDE_pygit2_reference_h
+#ifndef INCLUDE_pygit2_treebuilder_h
+#define INCLUDE_pygit2_treebuilder_h
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
+#include "types.h"
 
-PyObject* Reference_delete(Reference *self, PyObject *args);
-PyObject* Reference_rename(Reference *self, PyObject *py_name);
-PyObject* Reference_reload(Reference *self);
-PyObject* Reference_resolve(Reference *self, PyObject *args);
-PyObject* Reference_get_target(Reference *self);
-PyObject* Reference_get_name(Reference *self);
-PyObject* Reference_get_oid(Reference *self);
-PyObject* Reference_get_hex(Reference *self);
-PyObject* Reference_get_type(Reference *self);
-PyObject* wrap_reference(git_reference * c_reference);
+PyObject* TreeBuilder_insert(TreeBuilder *self, PyObject *args);
+PyObject* TreeBuilder_write(TreeBuilder *self);
+PyObject* TreeBuilder_remove(TreeBuilder *self, PyObject *py_filename);
+PyObject* TreeBuilder_clear(TreeBuilder *self);
 
 #endif

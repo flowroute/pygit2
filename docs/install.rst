@@ -6,8 +6,10 @@ How to Install
 .. contents::
 
 
-First you need to install the latest version of libgit2.  You can find
-platform-specific instructions to build the library in the libgit2 website:
+First you need to install the latest release of libgit2. If you clone
+the repository, make sure to use the ``master`` branch. You can find
+platform-specific instructions to build the library in the libgit2
+website:
 
   http://libgit2.github.com
 
@@ -22,6 +24,10 @@ When those are installed, you can install pygit2:
     $ cd pygit2
     $ python setup.py install
     $ python setup.py test
+
+.. note:: A minor version of pygit2 must be used with the corresponding minor
+   version of libgit2. For example, pygit2 v0.18.x must be used with libgit2
+   v0.18.0.
 
 Building on \*nix (including OS X)
 ===================================
@@ -55,7 +61,7 @@ instructions in the libgit2 ``README.md``):
 
 .. code-block:: sh
 
-  $ git clone git://github.com/libgit2/libgit2.git
+  $ git clone -b master git://github.com/libgit2/libgit2.git
   $ mkdir libgit2/build
   $ cd libgit2/build
   $ cmake ..
@@ -105,7 +111,7 @@ from a bash shell:
 .. code-block:: sh
 
     $ export LIBGIT2=C:/Dev/libgit2
-    $ git clone git://github.com/libgit2/libgit2.git
+    $ git clone -b master git://github.com/libgit2/libgit2.git
     $ cd libgit2
     $ mkdir build
     $ cd build

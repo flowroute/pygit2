@@ -31,7 +31,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
-#include <pygit2/types.h>
+#include "types.h"
 
 int  Repository_init(Repository *self, PyObject *args, PyObject *kwds);
 int  Repository_traverse(Repository *self, visitproc visit, void *arg);
@@ -54,7 +54,9 @@ PyObject* Repository_create_blob(Repository *self, PyObject *args);
 PyObject* Repository_create_blob_fromfile(Repository *self, PyObject *args);
 PyObject* Repository_create_commit(Repository *self, PyObject *args);
 PyObject* Repository_create_tag(Repository *self, PyObject *args);
+PyObject* Repository_create_branch(Repository *self, PyObject *args);
 PyObject* Repository_listall_references(Repository *self, PyObject *args);
+PyObject* Repository_listall_branches(Repository *self, PyObject *args);
 PyObject* Repository_lookup_reference(Repository *self, PyObject *py_name);
 
 PyObject*

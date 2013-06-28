@@ -25,18 +25,20 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef INCLUDE_pygit2_tag_h
-#define INCLUDE_pygit2_tag_h
+#ifndef INCLUDE_pygit2_walker_h
+#define INCLUDE_pygit2_walker_h
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
-#include <pygit2/types.h>
+#include "types.h"
 
-PyObject* Tag_get_target(Tag *self);
-PyObject* Tag_get_name(Tag *self);
-PyObject* Tag_get_tagger(Tag *self);
-PyObject* Tag_get_message(Tag *self);
-PyObject* Tag_get_raw_message(Tag *self);
+void Walker_dealloc(Walker *self);
+PyObject* Walker_hide(Walker *self, PyObject *py_hex);
+PyObject* Walker_push(Walker *self, PyObject *py_hex);
+PyObject* Walker_sort(Walker *self, PyObject *py_sort_mode);
+PyObject* Walker_reset(Walker *self);
+PyObject* Walker_iter(Walker *self);
+PyObject* Walker_iternext(Walker *self);
 
 #endif

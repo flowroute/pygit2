@@ -27,12 +27,12 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/utils.h>
-#include <pygit2/oid.h>
-#include <pygit2/repository.h>
-#include <pygit2/object.h>
+#include "error.h"
+#include "types.h"
+#include "utils.h"
+#include "oid.h"
+#include "repository.h"
+#include "object.h"
 
 extern PyTypeObject TreeType;
 extern PyTypeObject CommitType;
@@ -50,7 +50,7 @@ Object_dealloc(Object* self)
 
 
 PyDoc_STRVAR(Object_oid__doc__,
-  "The object id, a byte string 20 bytes long.");
+    "The object id, an instance of the Oid type.");
 
 PyObject *
 Object_oid__get__(Object *self)
@@ -60,12 +60,13 @@ Object_oid__get__(Object *self)
     oid = git_object_id(self->obj);
     assert(oid);
 
-    return git_oid_to_python(oid->id);
+    return git_oid_to_python(oid);
 }
 
 
 PyDoc_STRVAR(Object_hex__doc__,
-  "Hexadecimal representation of the object id, a text string 40 chars long.");
+    "Hexadecimal representation of the object id. This is a shortcut for\n"
+    "Object.oid.hex");
 
 PyObject *
 Object_hex__get__(Object *self)
@@ -80,8 +81,8 @@ Object_hex__get__(Object *self)
 
 
 PyDoc_STRVAR(Object_type__doc__,
-  "One of the GIT_OBJ_COMMIT, GIT_OBJ_TREE, GIT_OBJ_BLOB or GIT_OBJ_TAG\n"
-  "constants.");
+    "One of the GIT_OBJ_COMMIT, GIT_OBJ_TREE, GIT_OBJ_BLOB or GIT_OBJ_TAG\n"
+    "constants.");
 
 PyObject *
 Object_type__get__(Object *self)
@@ -91,7 +92,9 @@ Object_type__get__(Object *self)
 
 
 PyDoc_STRVAR(Object_read_raw__doc__,
-  "Returns the byte string with the raw contents of the of the object.");
+  "read_raw()\n"
+  "\n"
+  "Returns the byte string with the raw contents of the object.");
 
 PyObject *
 Object_read_raw(Object *self)
@@ -101,7 +104,6 @@ Object_read_raw(Object *self)
     PyObject *aux;
 
     oid = git_object_id(self->obj);
-    assert(oid);
 
     obj = Repository_read_raw(self->repo->repo, oid, GIT_OID_HEXSZ);
     if (obj == NULL)

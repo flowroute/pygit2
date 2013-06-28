@@ -1,8 +1,5 @@
 **********************************************************************
-Utilities
+Merge
 **********************************************************************
 
-.. automodule:: pygit2.utils
-   :members:
-   :show-inheritance:
-   :undoc-members:
+.. automethod:: pygit2.Repository.merge_base

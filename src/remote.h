@@ -25,20 +25,15 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef INCLUDE_pygit2_walker_h
-#define INCLUDE_pygit2_walker_h
+#ifndef INCLUDE_pygit2_remote_h
+#define INCLUDE_pygit2_remote_h
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
-#include <pygit2/types.h>
+#include <git2/remote.h>
 
-void Walker_dealloc(Walker *self);
-PyObject* Walker_hide(Walker *self, PyObject *py_hex);
-PyObject* Walker_push(Walker *self, PyObject *py_hex);
-PyObject* Walker_sort(Walker *self, PyObject *py_sort_mode);
-PyObject* Walker_reset(Walker *self);
-PyObject* Walker_iter(Walker *self);
-PyObject* Walker_iternext(Walker *self);
+PyObject* Remote_init(Remote *self, PyObject *args, PyObject *kwds);
+PyObject* Remote_fetch(Remote *self, PyObject *args);
 
 #endif

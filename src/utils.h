@@ -31,7 +31,13 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
-#include <pygit2/types.h>
+#include "types.h"
+
+#ifdef __GNUC__
+#  define PYGIT2_FN_UNUSED __attribute__((unused))
+#else
+#  define PYGIT2_FN_UNUSED
+#endif
 
 /* Python 2 support */
 #if PY_MAJOR_VERSION == 2
@@ -54,6 +60,11 @@
   #define to_encoding(x) PyUnicode_DecodeASCII(x, strlen(x), "strict")
 #endif
 
+#ifndef Py_hash_t
+  #define Py_hash_t long
+#endif
+
+
 #define CHECK_REFERENCE(self)\
     if (self->reference == NULL) {\
         PyErr_SetString(GitError, "deleted reference");\
@@ -68,8 +79,10 @@
 
 
 /* Utilities */
-#define to_unicode(x, encoding, errors) to_unicode_n(x, strlen(x), encoding, errors)
+#define to_unicode(x, encoding, errors)\
+        to_unicode_n(x, strlen(x), encoding, errors)
 
+PYGIT2_FN_UNUSED
 Py_LOCAL_INLINE(PyObject*)
 to_unicode_n(const char *value, size_t len, const char *encoding, const char *errors)
 {
@@ -85,6 +98,7 @@ to_unicode_n(const char *value, size_t len, const char *encoding, const char *er
     return PyUnicode_Decode(value, len, encoding, errors);
 }
 
+PYGIT2_FN_UNUSED
 Py_LOCAL_INLINE(PyObject*)
 to_bytes(const char * value)
 {
@@ -134,5 +148,23 @@ char * py_str_to_c_str(PyObject *value, const char *encoding);
             giterr_set_oom();\
             goto label;\
         }
+
+/* Helpers to make type init shorter. */
+#define INIT_TYPE(type, base, new) \
+    type.tp_base = base; \
+    type.tp_new = new; \
+    if (PyType_Ready(&type) < 0) return NULL;
+
+#define ADD_TYPE(module, type) \
+    Py_INCREF(& type ## Type);\
+    if (PyModule_AddObject(module, #type, (PyObject*) & type ## Type) == -1)\
+        return NULL;
+
+#define ADD_CONSTANT_INT(m, name) \
+    if (PyModule_AddIntConstant(m, #name, name) == -1) return NULL;
+
+#define ADD_CONSTANT_STR(m, name) \
+    if (PyModule_AddStringConstant(m, #name, name) == -1) return NULL;
+
 
 #endif

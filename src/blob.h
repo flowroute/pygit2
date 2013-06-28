@@ -31,7 +31,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
-#include <pygit2/types.h>
+#include "types.h"
 
 PyObject* Blob_get_size(Blob *self);
 

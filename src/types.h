@@ -46,6 +46,12 @@ typedef struct {
 } Repository;
 
 
+typedef struct {
+    PyObject_HEAD
+    git_oid oid;
+} Oid;
+
+
 #define SIMPLE_TYPE(_name, _ptr_type, _ptr_name) \
         typedef struct {\
             PyObject_HEAD\
@@ -105,7 +111,7 @@ typedef struct {
     const char * new_file_path;
     char* old_oid;
     char* new_oid;
-    unsigned status;
+    char status;
     unsigned similarity;
 } Patch;
 
@@ -124,7 +130,6 @@ SIMPLE_TYPE(TreeBuilder, git_treebuilder, bld)
 
 typedef struct {
     PyObject_HEAD
-    PyObject *owner; /* Tree or TreeBuilder */
     const git_tree_entry *entry;
 } TreeEntry;
 
@@ -153,10 +158,9 @@ typedef struct {
 /* git_reference, git_reflog */
 SIMPLE_TYPE(Walker, git_revwalk, walk)
 
-typedef struct {
-    PyObject_HEAD
-    git_reference *reference;
-} Reference;
+SIMPLE_TYPE(Reference, git_reference, reference)
+
+typedef Reference Branch;
 
 typedef struct {
     PyObject_HEAD
@@ -169,8 +173,8 @@ typedef struct {
 typedef struct {
     PyObject_HEAD
     git_reflog *reflog;
-    int i;
-    int size;
+    size_t i;
+    size_t size;
 } RefLogIter;
 
 
@@ -186,11 +190,5 @@ typedef struct {
 /* git_remote */
 SIMPLE_TYPE(Remote, git_remote, remote)
 
-
-PyObject*
-lookup_object_prefix(Repository *repo, const git_oid *oid, size_t len,
-                     git_otype type);
-
-PyObject* lookup_object(Repository *repo, const git_oid *oid, git_otype type);
 
 #endif

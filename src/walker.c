@@ -27,11 +27,11 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/error.h>
-#include <pygit2/utils.h>
-#include <pygit2/oid.h>
-#include <pygit2/tree.h>
-#include <pygit2/walker.h>
+#include "error.h"
+#include "utils.h"
+#include "oid.h"
+#include "tree.h"
+#include "walker.h"
 
 extern PyTypeObject CommitType;
 
@@ -55,9 +55,9 @@ Walker_hide(Walker *self, PyObject *py_hex)
     int err;
     git_oid oid;
 
-    err = py_str_to_git_oid_expand(self->repo->repo, py_hex, &oid);
+    err = py_oid_to_git_oid_expand(self->repo->repo, py_hex, &oid);
     if (err < 0)
-        return Error_set(err);
+        return NULL;
 
     err = git_revwalk_hide(self->walk, &oid);
     if (err < 0)
@@ -78,9 +78,9 @@ Walker_push(Walker *self, PyObject *py_hex)
     int err;
     git_oid oid;
 
-    err = py_str_to_git_oid_expand(self->repo->repo, py_hex, &oid);
+    err = py_oid_to_git_oid_expand(self->repo->repo, py_hex, &oid);
     if (err < 0)
-        return Error_set(err);
+        return NULL;
 
     err = git_revwalk_push(self->walk, &oid);
     if (err < 0)

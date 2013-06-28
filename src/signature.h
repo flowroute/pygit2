@@ -31,7 +31,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
-#include <pygit2/types.h>
+#include "types.h"
 
 PyObject* Signature_get_encoding(Signature *self);
 PyObject* Signature_get_raw_name(Signature *self);

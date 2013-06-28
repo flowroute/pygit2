@@ -27,11 +27,11 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/utils.h>
-#include <pygit2/oid.h>
-#include <pygit2/signature.h>
+#include "error.h"
+#include "types.h"
+#include "utils.h"
+#include "oid.h"
+#include "signature.h"
 
 int
 Signature_init(Signature *self, PyObject *args, PyObject *kwds)
@@ -148,7 +148,7 @@ PyDoc_STRVAR(Signature_time__doc__, "Unix time.");
 PyObject *
 Signature_time__get__(Signature *self)
 {
-    return PyLong_FromLong(self->signature->when.time);
+    return PyLong_FromLongLong(self->signature->when.time);
 }
 
 

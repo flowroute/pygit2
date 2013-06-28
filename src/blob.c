@@ -27,9 +27,9 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/utils.h>
-#include <pygit2/object.h>
-#include <pygit2/blob.h>
+#include "utils.h"
+#include "object.h"
+#include "blob.h"
 
 
 PyDoc_STRVAR(Blob_size__doc__, "Size.");
@@ -37,12 +37,13 @@ PyDoc_STRVAR(Blob_size__doc__, "Size.");
 PyObject *
 Blob_size__get__(Blob *self)
 {
-    return PyLong_FromLong(git_blob_rawsize(self->blob));
+    return PyLong_FromLongLong(git_blob_rawsize(self->blob));
 }
 
 
 PyDoc_STRVAR(Blob_data__doc__,
-  "Raw data. This is the same as Blob.read_raw()");
+  "The contents of the blob, a bytes string. This is the same as\n"
+  "Blob.read_raw()");
 
 PyGetSetDef Blob_getseters[] = {
     GETTER(Blob, size),

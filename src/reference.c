@@ -29,12 +29,13 @@
 #include <Python.h>
 #include <string.h>
 #include <structmember.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/utils.h>
-#include <pygit2/oid.h>
-#include <pygit2/signature.h>
-#include <pygit2/reference.h>
+#include "object.h"
+#include "error.h"
+#include "types.h"
+#include "utils.h"
+#include "oid.h"
+#include "signature.h"
+#include "reference.h"
 
 
 extern PyObject *GitError;
@@ -76,7 +77,7 @@ PyDoc_STRVAR(RefLogIterType__doc__, "Internal reflog iterator object.");
 
 PyTypeObject RefLogIterType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "_libgit2.RefLogIter",                     /* tp_name           */
+    "_pygit2.RefLogIter",                      /* tp_name           */
     sizeof(RefLogIter),                        /* tp_basicsize      */
     0,                                         /* tp_itemsize       */
     (destructor)RefLogIter_dealloc,            /* tp_dealloc        */
@@ -101,12 +102,13 @@ PyTypeObject RefLogIterType = {
     0,                                         /* tp_richcompare    */
     0,                                         /* tp_weaklistoffset */
     PyObject_SelfIter,                         /* tp_iter           */
-    (iternextfunc)RefLogIter_iternext          /* tp_iternext       */
+    (iternextfunc)RefLogIter_iternext,         /* tp_iternext       */
 };
 
 void
 Reference_dealloc(Reference *self)
 {
+    Py_CLEAR(self->repo);
     git_reference_free(self->reference);
     PyObject_Del(self);
 }
@@ -191,11 +193,14 @@ Reference_resolve(Reference *self, PyObject *args)
     if (err < 0)
         return Error_set(err);
 
-    return wrap_reference(c_reference);
+    return wrap_reference(c_reference, self->repo);
 }
 
 
-PyDoc_STRVAR(Reference_target__doc__, "Target.");
+PyDoc_STRVAR(Reference_target__doc__,
+    "The reference target: If direct the value will be an Oid object, if it\n"
+    "is symbolic it will be an string with the full name of the target\n"
+    "reference.");
 
 PyObject *
 Reference_target__get__(Reference *self)
@@ -204,50 +209,65 @@ Reference_target__get__(Reference *self)
 
     CHECK_REFERENCE(self);
 
-    /* Get the target */
-    if (GIT_REF_OID == git_reference_type(self->reference)) {
-        return git_oid_to_py_str(git_reference_target(self->reference));
-    } else {
-        c_name = git_reference_symbolic_target(self->reference);
-        if (c_name == NULL) {
-            PyErr_SetString(PyExc_ValueError, "no target available");
-            return NULL;
-        }
-    }
+    /* Case 1: Direct */
+    if (GIT_REF_OID == git_reference_type(self->reference))
+        return git_oid_to_python(git_reference_target(self->reference));
 
-    /* Make a PyString and return it */
+    /* Case 2: Symbolic */
+    c_name = git_reference_symbolic_target(self->reference);
+    if (c_name == NULL) {
+        PyErr_SetString(PyExc_ValueError, "no target available");
+        return NULL;
+    }
     return to_path(c_name);
 }
 
 int
-Reference_target__set__(Reference *self, PyObject *py_name)
+Reference_target__set__(Reference *self, PyObject *py_target)
 {
+    git_oid oid;
     char *c_name;
     int err;
     git_reference *new_ref;
 
     CHECK_REFERENCE_INT(self);
 
-    /* Get the C name */
-    c_name = py_path_to_c_str(py_name);
+    /* Case 1: Direct */
+    if (GIT_REF_OID == git_reference_type(self->reference)) {
+        err = py_oid_to_git_oid_expand(self->repo->repo, py_target, &oid);
+        if (err < 0)
+            return err;
+
+        err = git_reference_set_target(&new_ref, self->reference, &oid);
+        if (err < 0)
+            goto error;
+
+        git_reference_free(self->reference);
+        self->reference = new_ref;
+        return 0;
+    }
+
+    /* Case 2: Symbolic */
+    c_name = py_path_to_c_str(py_target);
     if (c_name == NULL)
         return -1;
 
-    /* Set the new target */
     err = git_reference_symbolic_set_target(&new_ref, self->reference, c_name);
     free(c_name);
-    if (err < 0) {
-        Error_set(err);
-        return -1;
-    }
+    if (err < 0)
+        goto error;
 
     git_reference_free(self->reference);
     self->reference = new_ref;
     return 0;
+
+error:
+    Error_set(err);
+    return -1;
 }
 
 
-PyDoc_STRVAR(Reference_name__doc__, "The full name of a reference.");
+PyDoc_STRVAR(Reference_name__doc__, "The full name of the reference.");
 
 PyObject *
 Reference_name__get__(Reference *self)
@@ -257,83 +277,8 @@ Reference_name__get__(Reference *self)
 }
 
 
-PyDoc_STRVAR(Reference_oid__doc__, "Object id.");
-
-PyObject *
-Reference_oid__get__(Reference *self)
-{
-    const git_oid *oid;
-
-    CHECK_REFERENCE(self);
-
-    /* Get the oid (only for "direct" references) */
-    oid = git_reference_target(self->reference);
-    if (oid == NULL) {
-        PyErr_SetString(PyExc_ValueError,
-                        "oid is only available if the reference is direct "
-                        "(i.e. not symbolic)");
-        return NULL;
-    }
-
-    /* Convert and return it */
-    return git_oid_to_python(oid->id);
-}
-
-int
-Reference_oid__set__(Reference *self, PyObject *py_hex)
-{
-    git_oid oid;
-    int err;
-    git_reference *new_ref;
-
-    CHECK_REFERENCE_INT(self);
-
-    /* Get the oid */
-    err = py_str_to_git_oid_expand(git_reference_owner(self->reference),
-                                                       py_hex, &oid);
-    if (err < 0) {
-        Error_set(err);
-        return -1;
-    }
-
-    /* Set the oid */
-    err = git_reference_set_target(&new_ref, self->reference, &oid);
-    if (err < 0) {
-        Error_set(err);
-        return -1;
-    }
-
-    git_reference_free(self->reference);
-    self->reference = new_ref;
-    return 0;
-}
-
-
-PyDoc_STRVAR(Reference_hex__doc__, "Hex oid.");
-
-PyObject *
-Reference_hex__get__(Reference *self)
-{
-    const git_oid *oid;
-
-    CHECK_REFERENCE(self);
-
-    /* Get the oid (only for "direct" references) */
-    oid = git_reference_target(self->reference);
-    if (oid == NULL) {
-        PyErr_SetString(PyExc_ValueError,
-                        "oid is only available if the reference is direct "
-                        "(i.e. not symbolic)");
-        return NULL;
-    }
-
-    /* Convert and return it */
-    return git_oid_to_py_str(oid);
-}
-
-
 PyDoc_STRVAR(Reference_type__doc__,
-  "Type (GIT_REF_OID or GIT_REF_SYMBOLIC).");
+    "Type, either GIT_REF_OID or GIT_REF_SYMBOLIC.");
 
 PyObject *
 Reference_type__get__(Reference *self)
@@ -365,6 +310,27 @@ Reference_log(Reference *self)
         iter->i = 0;
     }
     return (PyObject*)iter;
+}
+
+
+PyDoc_STRVAR(Reference_get_object__doc__,
+  "get_object() -> object\n"
+  "\n"
+  "Retrieves the object the current reference is pointing to.");
+
+PyObject *
+Reference_get_object(Reference *self)
+{
+    int err;
+    git_object* obj;
+
+    CHECK_REFERENCE(self);
+
+    err = git_reference_peel(&obj, self->reference, GIT_OBJ_ANY);
+    if (err < 0)
+        return Error_set(err);
+
+    return wrap_object(obj, self->repo);
 }
 
 
@@ -460,13 +426,12 @@ PyMethodDef Reference_methods[] = {
     METHOD(Reference, rename, METH_O),
     METHOD(Reference, resolve, METH_NOARGS),
     METHOD(Reference, log, METH_NOARGS),
+    METHOD(Reference, get_object, METH_NOARGS),
     {NULL}
 };
 
 PyGetSetDef Reference_getseters[] = {
     GETTER(Reference, name),
-    GETSET(Reference, oid),
-    GETTER(Reference, hex),
     GETSET(Reference, target),
     GETTER(Reference, type),
     {NULL}
@@ -518,13 +483,18 @@ PyTypeObject ReferenceType = {
 
 
 PyObject *
-wrap_reference(git_reference * c_reference)
+wrap_reference(git_reference * c_reference, Repository *repo)
 {
     Reference *py_reference=NULL;
 
     py_reference = PyObject_New(Reference, &ReferenceType);
-    if (py_reference)
+    if (py_reference) {
         py_reference->reference = c_reference;
+        if (repo) {
+            py_reference->repo = repo;
+            Py_INCREF(repo);
+        }
+    }
 
     return (PyObject *)py_reference;
 }

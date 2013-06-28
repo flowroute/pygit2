@@ -25,14 +25,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef INCLUDE_pygit2_remote_h
-#define INCLUDE_pygit2_remote_h
+#ifndef INCLUDE_pygit2_oid_h
+#define INCLUDE_pygit2_oid_h
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <git2.h>
 
-PyObject* Remote_init(Remote *self, PyObject *args, PyObject *kwds);
-PyObject* Remote_fetch(Remote *self, PyObject *args);
+size_t py_oid_to_git_oid(PyObject *py_str, git_oid *oid);
+int py_oid_to_git_oid_expand(git_repository *repo, PyObject *py_str,
+                             git_oid *oid);
+PyObject* git_oid_to_python(const git_oid *oid);
+PyObject* git_oid_to_py_str(const git_oid *oid);
 
 #endif

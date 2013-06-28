@@ -20,11 +20,12 @@ Pygit2 links:
 Quick install guide
 ===================
 
-1. Download libgit2 v0.17.0
-   https://github.com/downloads/libgit2/libgit2/libgit2-0.17.0.tar.gz
+1. Checkout the libgit2 stable branch::
+
+   $ git clone git://github.com/libgit2/libgit2.git -b master
 
 2. Build and install libgit2
-   http://libgit2.github.com/#install
+   https://github.com/libgit2/libgit2/#building-libgit2---using-cmake
 
 3. Install pygit2 with *pip*::
 
@@ -44,46 +45,54 @@ for the topic), send a pull request.
 Authors
 ==============
 
-The following people have contributed at least one patch to the
-pygit2 project (sorted alphabetically):
+This is the list of authors of pygit2, sorted by number of commits (as shown by
+``git shortlog -sn``):
 
+- J David Ibáñez
+- Nico von Geyso
+- W Trevor King
+- Dave Borowitz
+- Carlos Martín Nieto
+- Richo Healey
+- Christian Boos
+- Julien Miotte
+- Martin Lenders
+- Xavier Delannoy
+- Yonggang Luo
+- Valentin Haenel
+- Bernardo Heynemann
+- John Szakmeister
+- David Versmisse
+- Petr Hosek
+- Sebastian Thiel
+- Han-Wen Nienhuys
+- Petr Viktorin
 - Alex Chamberlain
 - Amit Bakshi
-- András Veres-Szentkirályi
+- Andrey Devyatkin
 - Ben Davis
+- Daniel Rodríguez Troitiño
+- Hervé Cauwelier
+- Jared Flatow
+- Sarath Lakshman
+- Vicent Marti
+- Zoran Zaric
+- András Veres-Szentkirályi
 - Benjamin Kircher
+- Benjamin Pollack
 - Bryan O'Sullivan
-- Carlos Martín Nieto
-- Christian Boos
-- David Borowitz (*Original author*)
 - David Sanders
-- David Versmisse
 - Eric Davis
 - Eric Schrijver
 - Erik van Zijst
 - Ferengee
-- Han-Wen Nienhuys
+- Fraser Tweedale
 - Hugh Cole-Baker
-- J David Ibáñez (*Current maintainer*)
-- Jared Flatow
-- John Szakmeister
 - Josh Bleecher Snyder
-- Julien Miotte
-- Martin Lenders
-- Nico von Geyso
-- Petr Hosek
-- Petr Viktorin
-- Richo Healey
+- Jun Omae
 - Ridge Kennedy
 - Rui Abreu Ferreira
-- Sarath Lakshman
-- Sebastian Thiel
-- Valentin Haenel
-- Vicent Marti
-- W Trevor King
-- Xavier Delannoy
-- Yonggang Luo
-- Zoran Zaric
+- Xu Tao
 - pistacchio
 
 

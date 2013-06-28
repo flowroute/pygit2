@@ -27,11 +27,12 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/utils.h>
-#include <pygit2/oid.h>
-#include <pygit2/index.h>
+#include "error.h"
+#include "types.h"
+#include "utils.h"
+#include "oid.h"
+#include "diff.h"
+#include "index.h"
 
 extern PyTypeObject IndexType;
 extern PyTypeObject TreeType;
@@ -114,54 +115,84 @@ Index_clear(Index *self)
 }
 
 
-PyDoc_STRVAR(Index_diff__doc__,
-  "diff([tree]) -> Diff\n"
+PyDoc_STRVAR(Index_diff_to_workdir__doc__,
+  "diff_to_workdir([flag, context_lines, interhunk_lines]) -> Diff\n"
   "\n"
   "Return a :py:class:`~pygit2.Diff` object with the differences between the\n"
-  "index and the working copy. If a :py:class:`~pygit2.Tree` object is\n"
-  "passed, return the diferences between the index and the given tree.");
+  "index and the working copy.\n"
+  "\n"
+  "Arguments:\n"
+  "\n"
+  "flag: a GIT_DIFF_* constant.\n"
+  "\n"
+  "context_lines: the number of unchanged lines that define the boundary\n"
+  "   of a hunk (and to display before and after)\n"
+  "\n"
+  "interhunk_lines: the maximum number of unchanged lines between hunk\n"
+  "   boundaries before the hunks will be merged into a one.\n");
 
 PyObject *
-Index_diff(Index *self, PyObject *args)
+Index_diff_to_workdir(Index *self, PyObject *args)
 {
     git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
     git_diff_list *diff;
     int err;
 
-    Diff *py_diff;
-    PyObject *py_obj = NULL;
-
-    if (!PyArg_ParseTuple(args, "|O", &py_obj))
+    if (!PyArg_ParseTuple(args, "|IHH", &opts.flags, &opts.context_lines,
+                                        &opts.interhunk_lines))
         return NULL;
 
-    if (py_obj == NULL) {
-        err = git_diff_index_to_workdir(
-                &diff,
-                self->repo->repo,
-                self->index,
-                &opts);
-    } else if (PyObject_TypeCheck(py_obj, &TreeType)) {
-        err = git_diff_tree_to_index(
-                &diff,
-                self->repo->repo,
-                ((Tree *)py_obj)->tree,
-                self->index,
-                &opts);
-    } else {
-        PyErr_SetObject(PyExc_TypeError, py_obj);
-        return NULL;
-    }
+    err = git_diff_index_to_workdir(
+            &diff,
+            self->repo->repo,
+            self->index,
+            &opts);
+
     if (err < 0)
         return Error_set(err);
 
-    py_diff = PyObject_New(Diff, &DiffType);
-    if (py_diff) {
-        Py_INCREF(self->repo);
-        py_diff->repo = self->repo;
-        py_diff->list = diff;
-    }
+    return wrap_diff(diff, self->repo);
+}
 
-    return (PyObject*)py_diff;
+PyDoc_STRVAR(Index_diff_to_tree__doc__,
+  "diff_to_tree(tree [, flag, context_lines, interhunk_lines]) -> Diff\n"
+  "\n"
+  "Return a :py:class:`~pygit2.Diff` object with the differences between the\n"
+  "index and the given tree.\n"
+  "\n"
+  "Arguments:\n"
+  "\n"
+  "tree: the tree to diff.\n"
+  "\n"
+  "flag: a GIT_DIFF_* constant.\n"
+  "\n"
+  "context_lines: the number of unchanged lines that define the boundary\n"
+  "   of a hunk (and to display before and after)\n"
+  "\n"
+  "interhunk_lines: the maximum number of unchanged lines between hunk\n"
+  "   boundaries before the hunks will be merged into a one.\n");
+
+PyObject *
+Index_diff_to_tree(Index *self, PyObject *args)
+{
+    Repository *py_repo;
+    git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
+    git_diff_list *diff;
+    int err;
+
+    Tree *py_tree = NULL;
+
+    if (!PyArg_ParseTuple(args, "O!|IHH", &TreeType, &py_tree, &opts.flags,
+                          &opts.context_lines, &opts.interhunk_lines))
+        return NULL;
+
+    py_repo = py_tree->repo;
+    err = git_diff_tree_to_index(&diff, py_repo->repo, py_tree->tree,
+                                 self->index, &opts);
+    if (err < 0)
+        return Error_set(err);
+
+    return wrap_diff(diff, py_repo);
 }
 
 
@@ -227,43 +258,6 @@ Index_write(Index *self)
     Py_RETURN_NONE;
 }
 
-/* This is an internal function, used by Index_getitem and Index_setitem */
-size_t
-Index_get_position(Index *self, PyObject *value)
-{
-    char *path;
-    size_t idx;
-    int err;
-
-    /* Case 1: integer */
-    if (PyLong_Check(value)) {
-        err = (int)PyLong_AsLong(value);
-        if (err == -1 && PyErr_Occurred())
-            return -1;
-        if (err < 0) {
-            PyErr_SetObject(PyExc_ValueError, value);
-            return -1;
-        }
-        return err;
-    }
-
-    /* Case 2: byte or text string */
-    path = py_path_to_c_str(value);
-    if (!path)
-        return -1;
-
-    err = git_index_find(&idx, self->index, path);
-    if (err < 0) {
-        Error_set_str(err, path);
-        free(path);
-        return -1;
-    }
-
-    free(path);
-
-    return idx;
-}
-
 int
 Index_contains(Index *self, PyObject *value)
 {
@@ -322,19 +316,34 @@ wrap_index_entry(const git_index_entry *entry, Index *index)
 PyObject *
 Index_getitem(Index *self, PyObject *value)
 {
-    size_t idx;
+    long idx;
+    char *path;
     const git_index_entry *index_entry;
 
-    idx = Index_get_position(self, value);
-    if (idx == -1)
-        return NULL;
+    /* Case 1: integer */
+    if (PyLong_Check(value)) {
+        idx = PyLong_AsLong(value);
+        if (idx == -1 && PyErr_Occurred())
+            return NULL;
+        if (idx < 0) {
+            PyErr_SetObject(PyExc_ValueError, value);
+            return NULL;
+        }
+        index_entry = git_index_get_byindex(self->index, (size_t)idx);
+    /* Case 2: byte or text string */
+    } else {
+        path = py_path_to_c_str(value);
+        if (!path)
+            return NULL;
 
-    index_entry = git_index_get_byindex(self->index, idx);
+        index_entry = git_index_get_bypath(self->index, path, 0);
+        free(path);
+    }
+
     if (!index_entry) {
         PyErr_SetObject(PyExc_KeyError, value);
         return NULL;
     }
-
     return wrap_index_entry(index_entry, self);
 }
 
@@ -362,21 +371,6 @@ Index_remove(Index *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
-int
-Index_setitem(Index *self, PyObject *key, PyObject *value)
-{
-    if (value != NULL) {
-        PyErr_SetString(PyExc_NotImplementedError,
-                        "set item on index not yet implemented");
-        return -1;
-    }
-
-    if (Index_remove(self, Py_BuildValue("(N)", key)) == NULL)
-        return -1;
-
-    return 0;
-}
-
 
 PyDoc_STRVAR(Index_read_tree__doc__,
   "read_tree(tree)\n"
@@ -388,14 +382,14 @@ Index_read_tree(Index *self, PyObject *value)
 {
     git_oid oid;
     git_tree *tree;
-    int err, len;
+    int err;
+    size_t len;
 
-    len = py_str_to_git_oid(value, &oid);
-    if (len < 0)
+    len = py_oid_to_git_oid(value, &oid);
+    if (len == 0)
         return NULL;
 
-    err = git_tree_lookup_prefix(&tree, self->repo->repo, &oid,
-                                 (unsigned int)len);
+    err = git_tree_lookup_prefix(&tree, self->repo->repo, &oid, len);
     if (err < 0)
         return Error_set(err);
 
@@ -409,7 +403,7 @@ Index_read_tree(Index *self, PyObject *value)
 
 
 PyDoc_STRVAR(Index_write_tree__doc__,
-  "write_tree() -> str\n"
+  "write_tree() -> Oid\n"
   "\n"
   "Create a tree object from the index file, return its oid.");
 
@@ -423,14 +417,15 @@ Index_write_tree(Index *self)
     if (err < 0)
         return Error_set(err);
 
-    return git_oid_to_python(oid.id);
+    return git_oid_to_python(&oid);
 }
 
 PyMethodDef Index_methods[] = {
     METHOD(Index, add, METH_VARARGS),
     METHOD(Index, remove, METH_VARARGS),
     METHOD(Index, clear, METH_NOARGS),
-    METHOD(Index, diff, METH_VARARGS),
+    METHOD(Index, diff_to_workdir, METH_VARARGS),
+    METHOD(Index, diff_to_tree, METH_VARARGS),
     METHOD(Index, _find, METH_O),
     METHOD(Index, read, METH_NOARGS),
     METHOD(Index, write, METH_NOARGS),
@@ -453,14 +448,14 @@ PySequenceMethods Index_as_sequence = {
 PyMappingMethods Index_as_mapping = {
     (lenfunc)Index_len,              /* mp_length */
     (binaryfunc)Index_getitem,       /* mp_subscript */
-    (objobjargproc)Index_setitem,    /* mp_ass_subscript */
+    NULL,                            /* mp_ass_subscript */
 };
 
 PyDoc_STRVAR(Index__doc__, "Index file.");
 
 PyTypeObject IndexType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "_pygit2.Index",                            /* tp_name           */
+    "_pygit2.Index",                           /* tp_name           */
     sizeof(Index),                             /* tp_basicsize      */
     0,                                         /* tp_itemsize       */
     (destructor)Index_dealloc,                 /* tp_dealloc        */
@@ -585,7 +580,7 @@ PyDoc_STRVAR(IndexEntry_oid__doc__, "Object id.");
 PyObject *
 IndexEntry_oid__get__(IndexEntry *self)
 {
-    return git_oid_to_python(self->entry->oid.id);
+    return git_oid_to_python(&self->entry->oid);
 }
 
 

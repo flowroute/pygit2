@@ -27,21 +27,25 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <pygit2/error.h>
-#include <pygit2/types.h>
-#include <pygit2/reference.h>
-#include <pygit2/utils.h>
-#include <pygit2/object.h>
-#include <pygit2/oid.h>
-#include <pygit2/note.h>
-#include <pygit2/repository.h>
-#include <pygit2/remote.h>
+#include "error.h"
+#include "types.h"
+#include "reference.h"
+#include "utils.h"
+#include "object.h"
+#include "oid.h"
+#include "note.h"
+#include "repository.h"
+#include "remote.h"
+#include "branch.h"
+#include <git2/odb_backend.h>
 
 extern PyObject *GitError;
 
 extern PyTypeObject IndexType;
 extern PyTypeObject WalkerType;
 extern PyTypeObject SignatureType;
+extern PyTypeObject ObjectType;
+extern PyTypeObject CommitType;
 extern PyTypeObject TreeType;
 extern PyTypeObject TreeBuilderType;
 extern PyTypeObject ConfigType;
@@ -61,27 +65,6 @@ int_to_loose_object_type(int type_id)
         case GIT_OBJ_TAG: return GIT_OBJ_TAG;
         default: return GIT_OBJ_BAD;
     }
-}
-
-PyObject *
-lookup_object_prefix(Repository *repo, const git_oid *oid, size_t len,
-                     git_otype type)
-{
-    int err;
-    git_object *obj;
-
-    err = git_object_lookup_prefix(&obj, repo->repo, oid,
-                                   (unsigned int)len, type);
-    if (err < 0)
-        return Error_set_oid(err, oid, len);
-
-    return wrap_object(obj, repo);
-}
-
-PyObject *
-lookup_object(Repository *repo, const git_oid *oid, git_otype type)
-{
-    return lookup_object_prefix(repo, oid, GIT_OID_HEXSZ, type);
 }
 
 int
@@ -135,50 +118,14 @@ Repository_clear(Repository *self)
     return 0;
 }
 
-int
-Repository_contains(Repository *self, PyObject *value)
-{
-    git_oid oid;
-    git_odb *odb;
-    int err, len, exists;
-
-    len = py_str_to_git_oid(value, &oid);
-    if (len < 0)
-        return -1;
-
-    err = git_repository_odb(&odb, self->repo);
-    if (err < 0) {
-        Error_set(err);
-        return -1;
-    }
-
-    if (len < GIT_OID_HEXSZ) {
-        git_odb_object *obj = NULL;
-        err = git_odb_read_prefix(&obj, odb, &oid, len);
-        if (err < 0 && err != GIT_ENOTFOUND) {
-            Error_set(err);
-            exists = -1;
-        } else {
-            exists = (err == 0);
-            if (obj)
-                git_odb_object_free(obj);
-        }
-    } else {
-        exists = git_odb_exists(odb, &oid);
-    }
-
-    git_odb_free(odb);
-    return exists;
-}
-
 static int
 Repository_build_as_iter(const git_oid *oid, void *accum)
 {
     int err;
-    PyObject *oid_str = git_oid_to_py_str(oid);
+    PyObject *py_oid = git_oid_to_python(oid);
 
-    err = PyList_Append((PyObject*)accum, oid_str);
-    Py_DECREF(oid_str);
+    err = PyList_Append((PyObject*)accum, py_oid);
+    Py_DECREF(py_oid);
     return err;
 }
 
@@ -195,11 +142,10 @@ Repository_as_iter(Repository *self)
 
     err = git_odb_foreach(odb, Repository_build_as_iter, (void*)accum);
     git_odb_free(odb);
-    if (err == GIT_EUSER) {
+    if (err == GIT_EUSER)
         return NULL;
-    } else if (err < 0) {
+    if (err < 0)
         return Error_set(err);
-    }
 
     return PyObject_GetIter(accum);
 }
@@ -212,8 +158,6 @@ PyObject *
 Repository_head__get__(Repository *self)
 {
     git_reference *head;
-    const git_oid *oid;
-    PyObject *pyobj;
     int err;
 
     err = git_repository_head(&head, self->repo);
@@ -226,10 +170,27 @@ Repository_head__get__(Repository *self)
         return NULL;
     }
 
-    oid = git_reference_target(head);
-    pyobj = lookup_object(self, oid, GIT_OBJ_COMMIT);
-    git_reference_free(head);
-    return pyobj;
+    return wrap_reference(head, self);
+}
+
+int
+Repository_head__set__(Repository *self, PyObject *py_refname)
+{
+    int err;
+    char *refname;
+
+    refname = py_str_to_c_str(py_refname, NULL);
+    if (refname == NULL)
+        return -1;
+
+    err = git_repository_set_head(self->repo, refname);
+    free(refname);
+    if (err < 0) {
+        Error_set_str(err, refname);
+        return -1;
+    }
+
+    return 0;
 }
 
 
@@ -287,17 +248,58 @@ Repository_is_bare__get__(Repository *self)
 }
 
 
-PyObject *
-Repository_getitem(Repository *self, PyObject *value)
-{
-    git_oid oid;
-    int len;
+PyDoc_STRVAR(Repository_git_object_lookup_prefix__doc__,
+  "git_object_lookup_prefix(oid) -> Object\n"
+  "\n"
+  "Returns the Git object with the given oid.");
 
-    len = py_str_to_git_oid(value, &oid);
-    if (len < 0)
+PyObject *
+Repository_git_object_lookup_prefix(Repository *self, PyObject *key)
+{
+    int err;
+    size_t len;
+    git_oid oid;
+    git_object *obj;
+
+    len = py_oid_to_git_oid(key, &oid);
+    if (len == 0)
         return NULL;
 
-    return lookup_object_prefix(self, &oid, len, GIT_OBJ_ANY);
+    err = git_object_lookup_prefix(&obj, self->repo, &oid, len, GIT_OBJ_ANY);
+    if (err == 0)
+        return wrap_object(obj, self);
+
+    if (err == GIT_ENOTFOUND)
+        Py_RETURN_NONE;
+
+    return Error_set_oid(err, &oid, len);
+}
+
+
+PyDoc_STRVAR(Repository_lookup_branch__doc__,
+  "lookup_branch(branch_name, [branch_type]) -> Object\n"
+  "\n"
+  "Returns the Git reference for the given branch name (local or remote).");
+
+PyObject *
+Repository_lookup_branch(Repository *self, PyObject *args)
+{
+    git_reference *c_reference;
+    const char *c_name;
+    git_branch_t branch_type = GIT_BRANCH_LOCAL;
+    int err;
+
+    if (!PyArg_ParseTuple(args, "s|I", &c_name, &branch_type))
+        return NULL;
+
+    err = git_branch_lookup(&c_reference, self->repo, c_name, branch_type);
+    if (err == 0)
+        return wrap_branch(c_reference, self);
+
+    if (err == GIT_ENOTFOUND)
+        Py_RETURN_NONE;
+
+    return Error_set(err);
 }
 
 
@@ -313,11 +315,10 @@ Repository_revparse_single(Repository *self, PyObject *py_spec)
 {
     git_object *c_obj;
     char *c_spec;
-    char *encoding = "ascii";
     int err;
 
     /* 1- Get the C revision spec */
-    c_spec = py_str_to_c_str(py_spec, encoding);
+    c_spec = py_str_to_c_str(py_spec, NULL);
     if (c_spec == NULL)
         return NULL;
 
@@ -368,11 +369,11 @@ Repository_read(Repository *self, PyObject *py_hex)
 {
     git_oid oid;
     git_odb_object *obj;
-    int len;
+    size_t len;
     PyObject* tuple;
 
-    len = py_str_to_git_oid(py_hex, &oid);
-    if (len < 0)
+    len = py_oid_to_git_oid(py_hex, &oid);
+    if (len == 0)
         return NULL;
 
     obj = Repository_read_raw(self->repo, &oid, len);
@@ -395,11 +396,11 @@ Repository_read(Repository *self, PyObject *py_hex)
 
 
 PyDoc_STRVAR(Repository_write__doc__,
-  "write(type, data) -> oid\n"
-  "\n"
-  "Write raw object data into the repository. First arg is the object type,\n"
-  "the second one a buffer with data. Return the object id (sha) of of the\n"
-  "created object.");
+    "write(type, data) -> Oid\n"
+    "\n"
+    "Write raw object data into the repository. First arg is the object\n"
+    "type, the second one a buffer with data. Return the Oid of the created\n"
+    "object.");
 
 PyObject *
 Repository_write(Repository *self, PyObject *args)
@@ -432,7 +433,7 @@ Repository_write(Repository *self, PyObject *args)
     stream->write(stream, buffer, buflen);
     err = stream->finalize_write(&oid, stream);
     stream->free(stream);
-    return git_oid_to_python(oid.id);
+    return git_oid_to_python(&oid);
 }
 
 
@@ -526,6 +527,9 @@ Repository_config__get__(Repository *self)
 
         py_config->config = config;
         self->config = (PyObject*)py_config;
+        // We need 2 refs here.
+        // One is returned, one is kept internally.
+        Py_INCREF(self->config);
     } else {
         Py_INCREF(self->config);
     }
@@ -533,11 +537,65 @@ Repository_config__get__(Repository *self)
     return self->config;
 }
 
+PyDoc_STRVAR(Repository_merge_base__doc__,
+  "merge_base(oid, oid) -> Oid\n"
+  "\n"
+  "Find as good common ancestors as possible for a merge.");
+
+PyObject *
+Repository_merge_base(Repository *self, PyObject *args)
+{
+    PyObject *value1;
+    PyObject *value2;
+    git_oid oid;
+    git_oid oid1;
+    git_oid oid2;
+    int err;
+
+    if (!PyArg_ParseTuple(args, "OO", &value1, &value2))
+        return NULL;
+
+    err = py_oid_to_git_oid_expand(self->repo, value1, &oid1);
+    if (err < 0)
+        return NULL;
+
+    err = py_oid_to_git_oid_expand(self->repo, value2, &oid2);
+    if (err < 0)
+        return NULL;
+
+    err = git_merge_base(&oid, self->repo, &oid1, &oid2);
+    if (err < 0)
+        return Error_set(err);
+
+    return git_oid_to_python(&oid);
+}
 
 PyDoc_STRVAR(Repository_walk__doc__,
   "walk(oid, sort_mode) -> iterator\n"
   "\n"
-  "Generator that traverses the history starting from the given commit.");
+  "Generator that traverses the history starting from the given commit.\n"
+  "The following types of sorting could be used to control traversing\n"
+  "direction:\n"
+  "\n"
+  "* GIT_SORT_NONE. This is the default sorting for new walkers\n"
+  "  Sort the repository contents in no particular ordering\n"
+  "* GIT_SORT_TOPOLOGICAL. Sort the repository contents in topological order\n"
+  "  (parents before children); this sorting mode can be combined with\n"
+  "  time sorting.\n"
+  "* GIT_SORT_TIME. Sort the repository contents by commit time\n"
+  "* GIT_SORT_REVERSE. Iterate through the repository contents in reverse\n"
+  "  order; this sorting mode can be combined with any of the above.\n"
+  "\n"
+  "Example:\n"
+  "\n"
+  "  >>> from pygit2 import Repository\n"
+  "  >>> from pygit2 import GIT_SORT_TOPOLOGICAL, GIT_SORT_REVERSE\n"
+  "  >>> repo = Repository('.git')\n"
+  "  >>> for commit in repo.walk(repo.head.oid, GIT_SORT_TOPOLOGICAL):\n"
+  "  ...    print commit.message\n"
+  "  >>> for commit in repo.walk(repo.head.oid, GIT_SORT_TOPOLOGICAL | GIT_SORT_REVERSE):\n"
+  "  ...    print commit.message\n"
+  "  >>>\n");
 
 PyObject *
 Repository_walk(Repository *self, PyObject *args)
@@ -561,10 +619,10 @@ Repository_walk(Repository *self, PyObject *args)
 
     /* Push */
     if (value != Py_None) {
-        err = py_str_to_git_oid_expand(self->repo, value, &oid);
+        err = py_oid_to_git_oid_expand(self->repo, value, &oid);
         if (err < 0) {
             git_revwalk_free(walk);
-            return Error_set(err);
+            return NULL;
         }
 
         err = git_revwalk_push(walk, &oid);
@@ -588,9 +646,10 @@ Repository_walk(Repository *self, PyObject *args)
 
 
 PyDoc_STRVAR(Repository_create_blob__doc__,
-  "create_blob(data) -> bytes\n"
-  "\n"
-  "Create a new blob from memory.");
+    "create_blob(data) -> Oid\n"
+    "\n"
+    "Create a new blob from a bytes string. The blob is added to the Git\n"
+    "object database. Returns the oid of the blob.");
 
 PyObject *
 Repository_create_blob(Repository *self, PyObject *args)
@@ -607,17 +666,19 @@ Repository_create_blob(Repository *self, PyObject *args)
     if (err < 0)
         return Error_set(err);
 
-    return git_oid_to_python(oid.id);
+    return git_oid_to_python(&oid);
 }
 
 
-PyDoc_STRVAR(Repository_create_blob_fromfile__doc__,
-  "create_blob_fromfile(path) -> bytes\n"
-  "\n"
-  "Create a new blob from file.");
+PyDoc_STRVAR(Repository_create_blob_fromworkdir__doc__,
+    "create_blob_fromworkdir(path) -> Oid\n"
+    "\n"
+    "Create a new blob from a file within the working directory. The given\n"
+    "path must be relative to the working directory, if it is not an error\n"
+    "is raised.");
 
 PyObject *
-Repository_create_blob_fromfile(Repository *self, PyObject *args)
+Repository_create_blob_fromworkdir(Repository *self, PyObject *args)
 {
     git_oid oid;
     const char* path;
@@ -630,14 +691,37 @@ Repository_create_blob_fromfile(Repository *self, PyObject *args)
     if (err < 0)
         return Error_set(err);
 
-    return git_oid_to_python(oid.id);
+    return git_oid_to_python(&oid);
+}
+
+
+PyDoc_STRVAR(Repository_create_blob_fromdisk__doc__,
+    "create_blob_fromdisk(path) -> Oid\n"
+    "\n"
+    "Create a new blob from a file anywhere (no working directory check).");
+
+PyObject *
+Repository_create_blob_fromdisk(Repository *self, PyObject *args)
+{
+    git_oid oid;
+    const char* path;
+    int err;
+
+    if (!PyArg_ParseTuple(args, "s", &path))
+        return NULL;
+
+    err = git_blob_create_fromdisk(&oid, self->repo, path);
+    if (err < 0)
+        return Error_set(err);
+
+    return git_oid_to_python(&oid);
 }
 
 
 PyDoc_STRVAR(Repository_create_commit__doc__,
-  "create_commit(reference, author, committer, message, tree, parents[, encoding]) -> bytes\n"
+  "create_commit(reference, author, committer, message, tree, parents[, encoding]) -> Oid\n"
   "\n"
-  "Create a new commit object, return its SHA.");
+  "Create a new commit object, return its oid.");
 
 PyObject *
 Repository_create_commit(Repository *self, PyObject *args)
@@ -652,7 +736,8 @@ Repository_create_commit(Repository *self, PyObject *args)
     git_tree *tree = NULL;
     int parent_count;
     git_commit **parents = NULL;
-    int err = 0, i = 0, len;
+    int err = 0, i = 0;
+    size_t len;
 
     if (!PyArg_ParseTuple(args, "zO!O!OOO!|s",
                           &update_ref,
@@ -664,15 +749,15 @@ Repository_create_commit(Repository *self, PyObject *args)
                           &encoding))
         return NULL;
 
-    len = py_str_to_git_oid(py_oid, &oid);
-    if (len < 0)
+    len = py_oid_to_git_oid(py_oid, &oid);
+    if (len == 0)
         goto out;
 
     message = py_str_to_c_str(py_message, encoding);
     if (message == NULL)
         goto out;
 
-    err = git_tree_lookup_prefix(&tree, self->repo, &oid, (unsigned int)len);
+    err = git_tree_lookup_prefix(&tree, self->repo, &oid, len);
     if (err < 0) {
         Error_set(err);
         goto out;
@@ -686,12 +771,14 @@ Repository_create_commit(Repository *self, PyObject *args)
     }
     for (; i < parent_count; i++) {
         py_parent = PyList_GET_ITEM(py_parents, i);
-        len = py_str_to_git_oid(py_parent, &oid);
-        if (len < 0)
+        len = py_oid_to_git_oid(py_parent, &oid);
+        if (len == 0)
             goto out;
-        if (git_commit_lookup_prefix(&parents[i], self->repo, &oid,
-                                     (unsigned int)len))
+        err = git_commit_lookup_prefix(&parents[i], self->repo, &oid, len);
+        if (err < 0) {
+            Error_set(err);
             goto out;
+        }
     }
 
     err = git_commit_create(&oid, self->repo, update_ref,
@@ -703,7 +790,7 @@ Repository_create_commit(Repository *self, PyObject *args)
         goto out;
     }
 
-    py_result = git_oid_to_python(oid.id);
+    py_result = git_oid_to_python(&oid);
 
 out:
     free(message);
@@ -718,9 +805,9 @@ out:
 
 
 PyDoc_STRVAR(Repository_create_tag__doc__,
-  "create_tag(name, oid, type, tagger, message) -> bytes\n"
+  "create_tag(name, oid, type, tagger, message) -> Oid\n"
   "\n"
-  "Create a new tag object, return its SHA.");
+  "Create a new tag object, return its oid.");
 
 PyObject *
 Repository_create_tag(Repository *self, PyObject *args)
@@ -730,7 +817,8 @@ Repository_create_tag(Repository *self, PyObject *args)
     char *tag_name, *message;
     git_oid oid;
     git_object *target = NULL;
-    int err, target_type, len;
+    int err, target_type;
+    size_t len;
 
     if (!PyArg_ParseTuple(args, "sOiO!s",
                           &tag_name,
@@ -740,18 +828,51 @@ Repository_create_tag(Repository *self, PyObject *args)
                           &message))
         return NULL;
 
-    len = py_str_to_git_oid(py_oid, &oid);
-    if (len < 0)
+    len = py_oid_to_git_oid(py_oid, &oid);
+    if (len == 0)
         return NULL;
 
-    err = git_object_lookup_prefix(&target, self->repo, &oid,
-                                   (unsigned int)len, target_type);
+    err = git_object_lookup_prefix(&target, self->repo, &oid, len,
+                                   target_type);
     err = err < 0 ? err : git_tag_create(&oid, self->repo, tag_name, target,
                          py_tagger->signature, message, 0);
     git_object_free(target);
     if (err < 0)
         return Error_set_oid(err, &oid, len);
-    return git_oid_to_python(oid.id);
+    return git_oid_to_python(&oid);
+}
+
+
+PyDoc_STRVAR(Repository_create_branch__doc__,
+  "create_branch(name, commit, force=False) -> bytes\n"
+  "\n"
+  "Create a new branch \"name\" which points to a commit.\n"
+  "\n"
+  "Arguments:\n"
+  "\n"
+  "force\n"
+  "    If True branches will be overridden, otherwise (the default) an\n"
+  "    exception is raised.\n"
+  "\n"
+  "Examples::\n"
+  "\n"
+  "    repo.create_branch('foo', repo.head.hex, force=False)");
+
+PyObject* Repository_create_branch(Repository *self, PyObject *args)
+{
+    Commit *py_commit;
+    git_reference *c_reference;
+    char *c_name;
+    int err, force = 0;
+
+    if (!PyArg_ParseTuple(args, "sO!|i", &c_name, &CommitType, &py_commit, &force))
+        return NULL;
+
+    err = git_branch_create(&c_reference, self->repo, c_name, py_commit->commit, force);
+    if (err < 0)
+        return Error_set(err);
+
+    return wrap_branch(c_reference, self);
 }
 
 
@@ -799,6 +920,77 @@ out:
 }
 
 
+PyDoc_STRVAR(Repository_listall_branches__doc__,
+  "listall_branches([flags]) -> (str, ...)\n"
+  "\n"
+  "Return a tuple with all the branches in the repository.");
+
+struct branch_foreach_s {
+    PyObject *tuple;
+    Py_ssize_t pos;
+};
+
+int
+branch_foreach_cb(const char *branch_name, git_branch_t branch_type, void *payload)
+{
+    /* This is the callback that will be called in git_branch_foreach. It
+     * will be called for every branch.
+     * payload is a struct branch_foreach_s.
+     */
+    int err;
+    struct branch_foreach_s *payload_s = (struct branch_foreach_s *)payload;
+
+    if (PyTuple_Size(payload_s->tuple) <= payload_s->pos)
+    {
+        err = _PyTuple_Resize(&(payload_s->tuple), payload_s->pos * 2);
+        if (err) {
+            Py_CLEAR(payload_s->tuple);
+            return GIT_ERROR;
+        }
+    }
+
+    PyObject *py_branch_name = to_path(branch_name);
+    if (py_branch_name == NULL) {
+        Py_CLEAR(payload_s->tuple);
+        return GIT_ERROR;
+    }
+
+    PyTuple_SET_ITEM(payload_s->tuple, payload_s->pos++, py_branch_name);
+
+    return GIT_OK;
+}
+
+
+PyObject *
+Repository_listall_branches(Repository *self, PyObject *args)
+{
+    unsigned int list_flags = GIT_BRANCH_LOCAL;
+    int err;
+
+    /* 1- Get list_flags */
+    if (!PyArg_ParseTuple(args, "|I", &list_flags))
+        return NULL;
+
+    /* 2- Get the C result */
+    struct branch_foreach_s payload;
+    payload.tuple = PyTuple_New(4);
+    if (payload.tuple == NULL)
+        return NULL;
+
+    payload.pos = 0;
+    err = git_branch_foreach(self->repo, list_flags, branch_foreach_cb, &payload);
+    if (err != GIT_OK)
+        return Error_set(err);
+
+    /* 3- Trim the tuple */
+    err = _PyTuple_Resize(&payload.tuple, payload.pos);
+    if (err)
+        return Error_set(err);
+
+    return payload.tuple;
+}
+
+
 PyDoc_STRVAR(Repository_lookup_reference__doc__,
   "lookup_reference(name) -> Reference\n"
   "\n"
@@ -826,11 +1018,11 @@ Repository_lookup_reference(Repository *self, PyObject *py_name)
     free(c_name);
 
     /* 3- Make an instance of Reference and return it */
-    return wrap_reference(c_reference);
+    return wrap_reference(c_reference, self);
 }
 
-PyDoc_STRVAR(Repository_create_direct_reference__doc__,
-  "create_reference(name, target, force) -> Reference\n"
+PyDoc_STRVAR(Repository_create_reference_direct__doc__,
+  "git_reference_create(name, target, force) -> Reference\n"
   "\n"
   "Create a new reference \"name\" which points to an object.\n"
   "\n"
@@ -842,10 +1034,10 @@ PyDoc_STRVAR(Repository_create_direct_reference__doc__,
   "\n"
   "Examples::\n"
   "\n"
-  "    repo.create_direct_reference('refs/heads/foo', repo.head.hex, False)");
+  "    repo.git_reference_create('refs/heads/foo', repo.head.hex, False)");
 
 PyObject *
-Repository_create_direct_reference(Repository *self,  PyObject *args,
+Repository_create_reference_direct(Repository *self,  PyObject *args,
                                    PyObject *kw)
 {
     PyObject *py_obj;
@@ -857,19 +1049,19 @@ Repository_create_direct_reference(Repository *self,  PyObject *args,
     if (!PyArg_ParseTuple(args, "sOi", &c_name, &py_obj, &force))
         return NULL;
 
-    err = py_str_to_git_oid_expand(self->repo, py_obj, &oid);
+    err = py_oid_to_git_oid_expand(self->repo, py_obj, &oid);
     if (err < 0)
-        return Error_set(err);
+        return NULL;
 
     err = git_reference_create(&c_reference, self->repo, c_name, &oid, force);
     if (err < 0)
         return Error_set(err);
 
-    return wrap_reference(c_reference);
+    return wrap_reference(c_reference, self);
 }
 
-PyDoc_STRVAR(Repository_create_symbolic_reference__doc__,
-  "create_symbolic_reference(name, source, force) -> Reference\n"
+PyDoc_STRVAR(Repository_create_reference_symbolic__doc__,
+  "git_reference_symbolic_create(name, source, force) -> Reference\n"
   "\n"
   "Create a new reference \"name\" which points to another reference.\n"
   "\n"
@@ -881,40 +1073,25 @@ PyDoc_STRVAR(Repository_create_symbolic_reference__doc__,
   "\n"
   "Examples::\n"
   "\n"
-  "    repo.create_reference('refs/tags/foo', 'refs/heads/master', False)");
+  "    repo.git_reference_symbolic_create('refs/tags/foo', 'refs/heads/master', False)");
 
 PyObject *
-Repository_create_symbolic_reference(Repository *self,  PyObject *args,
+Repository_create_reference_symbolic(Repository *self,  PyObject *args,
                                      PyObject *kw)
 {
-    PyObject *py_obj;
     git_reference *c_reference;
     char *c_name, *c_target;
     int err, force;
 
-    if (!PyArg_ParseTuple(args, "sOi", &c_name, &py_obj, &force))
-        return NULL;
-
-    #if PY_MAJOR_VERSION == 2
-    c_target = PyBytes_AsString(py_obj);
-    #else
-    // increases ref counter, so we have to release it afterwards
-    PyObject* py_str = PyUnicode_AsASCIIString(py_obj);
-    c_target = PyBytes_AsString(py_str);
-    #endif
-    if (c_target == NULL)
+    if (!PyArg_ParseTuple(args, "ssi", &c_name, &c_target, &force))
         return NULL;
 
     err = git_reference_symbolic_create(&c_reference, self->repo, c_name,
                                         c_target, force);
-    #if PY_MAJOR_VERSION > 2
-      Py_CLEAR(py_str);
-    #endif
-
     if (err < 0)
         return Error_set(err);
 
-    return wrap_reference(c_reference);
+    return wrap_reference(c_reference, self);
 }
 
 
@@ -1008,7 +1185,7 @@ Repository_TreeBuilder(Repository *self, PyObject *args)
             }
             tree = py_tree->tree;
         } else {
-            err = py_str_to_git_oid_expand(self->repo, py_src, &oid);
+            err = py_oid_to_git_oid_expand(self->repo, py_src, &oid);
             if (err < 0)
                 return NULL;
 
@@ -1038,7 +1215,7 @@ Repository_TreeBuilder(Repository *self, PyObject *args)
 
 
 PyDoc_STRVAR(Repository_create_remote__doc__,
-  "remote_create(name, url) -> Remote\n"
+  "create_remote(name, url) -> Remote\n"
   "\n"
   "Creates a new remote.");
 
@@ -1058,6 +1235,7 @@ Repository_create_remote(Repository *self, PyObject *args)
         return Error_set(err);
 
     py_remote = PyObject_New(Remote, &RemoteType);
+    Py_INCREF(self);
     py_remote->repo = self;
     py_remote->remote = remote;
 
@@ -1065,7 +1243,7 @@ Repository_create_remote(Repository *self, PyObject *args)
 }
 
 
-PyDoc_STRVAR(Repository_remotes__doc__, "returns all configured remotes");
+PyDoc_STRVAR(Repository_remotes__doc__, "Returns all configured remotes.");
 
 PyObject *
 Repository_remotes__get__(Repository *self)
@@ -1091,47 +1269,72 @@ Repository_remotes__get__(Repository *self)
 }
 
 
-PyDoc_STRVAR(Repository_checkout__doc__,
-  "checkout([strategy:int, reference:Reference])\n"
-  "\n"
-  "Checks out a tree by a given reference and modifies the HEAD pointer\n"
-  "Standard checkout strategy is pygit2.GIT_CHECKOUT_SAFE_CREATE\n"
-  "If no reference is given, checkout will use HEAD instead.");
+PyDoc_STRVAR(Repository_checkout_head__doc__,
+    "checkout_head(strategy)\n"
+    "\n"
+    "Checkout the head using the given strategy.");
 
 PyObject *
-Repository_checkout(Repository *self, PyObject *args, PyObject *kw)
+Repository_checkout_head(Repository *self, PyObject *args)
 {
     git_checkout_opts opts = GIT_CHECKOUT_OPTS_INIT;
-    unsigned int strategy = GIT_CHECKOUT_SAFE_CREATE;
-    Reference* ref = NULL;
-    git_object* object;
-    const git_oid* id;
-    int err, head = 0;
+    unsigned int strategy;
+    int err;
 
-    static char *kwlist[] = {"strategy", "reference", "head", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kw, "|IO!i", kwlist,
-                                     &strategy, &ReferenceType, &ref, &head))
+    if (!PyArg_ParseTuple(args, "I", &strategy))
         return NULL;
 
-    if (ref != NULL) { /* checkout from treeish */
-        id = git_reference_target(ref->reference);
-        err = git_object_lookup(&object, self->repo, id, GIT_OBJ_COMMIT);
-        if (err == GIT_OK) {
-            opts.checkout_strategy = strategy;
-            err = git_checkout_tree(self->repo, object, &opts);
-            if (err == GIT_OK) {
-                err = git_repository_set_head(self->repo,
-                          git_reference_name(ref->reference));
-            }
-            git_object_free(object);
-        }
-    } else { /* checkout from head / index */
-        opts.checkout_strategy = strategy;
-        err = (!head) ? git_checkout_index(self->repo, NULL, &opts) :
-                        git_checkout_head(self->repo, &opts);
-    }
+    opts.checkout_strategy = strategy;
+    err = git_checkout_head(self->repo, &opts);
+    if (err < 0)
+        return Error_set(err);
 
+    Py_RETURN_NONE;
+}
+
+
+PyDoc_STRVAR(Repository_checkout_index__doc__,
+    "checkout_index(strategy)\n"
+    "\n"
+    "Checkout the index using the given strategy.");
+
+PyObject *
+Repository_checkout_index(Repository *self, PyObject *args)
+{
+    git_checkout_opts opts = GIT_CHECKOUT_OPTS_INIT;
+    unsigned int strategy;
+    int err;
+
+    if (!PyArg_ParseTuple(args, "I", &strategy))
+        return NULL;
+
+    opts.checkout_strategy = strategy;
+    err = git_checkout_index(self->repo, NULL, &opts);
+    if (err < 0)
+        return Error_set(err);
+
+    Py_RETURN_NONE;
+}
+
+
+PyDoc_STRVAR(Repository_checkout_tree__doc__,
+    "checkout_tree(treeish, strategy)\n"
+    "\n"
+    "Checkout the given tree, commit or tag, using the given strategy.");
+
+PyObject *
+Repository_checkout_tree(Repository *self, PyObject *args)
+{
+    git_checkout_opts opts = GIT_CHECKOUT_OPTS_INIT;
+    unsigned int strategy;
+    Object *py_object;
+    int err;
+
+    if (!PyArg_ParseTuple(args, "O!I", &ObjectType, &py_object, &strategy))
+        return NULL;
+
+    opts.checkout_strategy = strategy;
+    err = git_checkout_tree(self->repo, py_object->obj, &opts);
     if (err < 0)
         return Error_set(err);
 
@@ -1142,7 +1345,7 @@ Repository_checkout(Repository *self, PyObject *args, PyObject *kw)
 PyDoc_STRVAR(Repository_notes__doc__, "");
 
 PyObject *
-Repository_notes(Repository *self, PyObject* args)
+Repository_notes(Repository *self, PyObject *args)
 {
     NoteIter *iter = NULL;
     char *ref = "refs/notes/commits";
@@ -1164,12 +1367,11 @@ Repository_notes(Repository *self, PyObject* args)
     }
 
     return Error_set(err);
-
 }
 
 
 PyDoc_STRVAR(Repository_create_note__doc__,
-  "create_note(message, author, committer, annotated_id [,ref, force]) -> ID\n"
+  "create_note(message, author, committer, annotated_id [,ref, force]) -> Oid\n"
   "\n"
   "Create a new note for an object, return its SHA-ID."
   "If no ref is given 'refs/notes/commits' will be used.");
@@ -1200,7 +1402,7 @@ Repository_create_note(Repository *self, PyObject* args)
     if (err < 0)
         return Error_set(err);
 
-    return git_oid_to_python(note_id.id);
+    return git_oid_to_python(&note_id);
 }
 
 
@@ -1228,32 +1430,40 @@ Repository_lookup_note(Repository *self, PyObject* args)
 
 PyMethodDef Repository_methods[] = {
     METHOD(Repository, create_blob, METH_VARARGS),
-    METHOD(Repository, create_blob_fromfile, METH_VARARGS),
+    METHOD(Repository, create_blob_fromworkdir, METH_VARARGS),
+    METHOD(Repository, create_blob_fromdisk, METH_VARARGS),
     METHOD(Repository, create_commit, METH_VARARGS),
     METHOD(Repository, create_tag, METH_VARARGS),
     METHOD(Repository, TreeBuilder, METH_VARARGS),
     METHOD(Repository, walk, METH_VARARGS),
+    METHOD(Repository, merge_base, METH_VARARGS),
     METHOD(Repository, read, METH_O),
     METHOD(Repository, write, METH_VARARGS),
-    METHOD(Repository, create_direct_reference, METH_VARARGS),
-    METHOD(Repository, create_symbolic_reference, METH_VARARGS),
+    METHOD(Repository, create_reference_direct, METH_VARARGS),
+    METHOD(Repository, create_reference_symbolic, METH_VARARGS),
     METHOD(Repository, listall_references, METH_VARARGS),
     METHOD(Repository, lookup_reference, METH_O),
     METHOD(Repository, revparse_single, METH_O),
     METHOD(Repository, status, METH_NOARGS),
     METHOD(Repository, status_file, METH_O),
     METHOD(Repository, create_remote, METH_VARARGS),
-    METHOD(Repository, checkout, METH_VARARGS|METH_KEYWORDS),
+    METHOD(Repository, checkout_head, METH_VARARGS),
+    METHOD(Repository, checkout_index, METH_VARARGS),
+    METHOD(Repository, checkout_tree, METH_VARARGS),
     METHOD(Repository, notes, METH_VARARGS),
     METHOD(Repository, create_note, METH_VARARGS),
     METHOD(Repository, lookup_note, METH_VARARGS),
+    METHOD(Repository, git_object_lookup_prefix, METH_O),
+    METHOD(Repository, lookup_branch, METH_VARARGS),
+    METHOD(Repository, listall_branches, METH_VARARGS),
+    METHOD(Repository, create_branch, METH_VARARGS),
     {NULL}
 };
 
 PyGetSetDef Repository_getseters[] = {
     GETTER(Repository, index),
     GETTER(Repository, path),
-    GETTER(Repository, head),
+    GETSET(Repository, head),
     GETTER(Repository, head_is_detached),
     GETTER(Repository, head_is_orphaned),
     GETTER(Repository, is_empty),
@@ -1262,23 +1472,6 @@ PyGetSetDef Repository_getseters[] = {
     GETTER(Repository, workdir),
     GETTER(Repository, remotes),
     {NULL}
-};
-
-PySequenceMethods Repository_as_sequence = {
-    0,                               /* sq_length */
-    0,                               /* sq_concat */
-    0,                               /* sq_repeat */
-    0,                               /* sq_item */
-    0,                               /* sq_slice */
-    0,                               /* sq_ass_item */
-    0,                               /* sq_ass_slice */
-    (objobjproc)Repository_contains, /* sq_contains */
-};
-
-PyMappingMethods Repository_as_mapping = {
-    0,                               /* mp_length */
-    (binaryfunc)Repository_getitem,  /* mp_subscript */
-    0,                               /* mp_ass_subscript */
 };
 
 
@@ -1299,8 +1492,8 @@ PyTypeObject RepositoryType = {
     0,                                         /* tp_compare        */
     0,                                         /* tp_repr           */
     0,                                         /* tp_as_number      */
-    &Repository_as_sequence,                   /* tp_as_sequence    */
-    &Repository_as_mapping,                    /* tp_as_mapping     */
+    0,                                         /* tp_as_sequence    */
+    0,                                         /* tp_as_mapping     */
     0,                                         /* tp_hash           */
     0,                                         /* tp_call           */
     0,                                         /* tp_str            */
