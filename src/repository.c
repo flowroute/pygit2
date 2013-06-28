@@ -877,25 +877,20 @@ PyObject* Repository_create_branch(Repository *self, PyObject *args)
 
 
 PyDoc_STRVAR(Repository_listall_references__doc__,
-  "listall_references([flags]) -> (str, ...)\n"
+  "listall_references() -> (str, ...)\n"
   "\n"
   "Return a tuple with all the references in the repository.");
 
 PyObject *
 Repository_listall_references(Repository *self, PyObject *args)
 {
-    unsigned list_flags=GIT_REF_LISTALL;
     git_strarray c_result;
     PyObject *py_result, *py_string;
     unsigned index;
     int err;
 
-    /* 1- Get list_flags */
-    if (!PyArg_ParseTuple(args, "|I", &list_flags))
-        return NULL;
-
     /* 2- Get the C result */
-    err = git_reference_list(&c_result, self->repo, list_flags);
+    err = git_reference_list(&c_result, self->repo);
     if (err < 0)
         return Error_set(err);
 
