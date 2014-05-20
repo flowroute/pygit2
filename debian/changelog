@@ -1,3 +1,9 @@
+pygit2 (0.20.3-1) trusty; urgency=medium
+
+  * New release
+
+ -- Dennis Kaarsemaker <dennis@kaarsemaker.net>  Tue, 20 May 2014 02:03:03 +0200
+
 pygit2 (0.18.1+git20130628) quantal; urgency=low
 
   * New git pull
