@@ -2,7 +2,7 @@ Source: pygit2
 Section: python
 Priority: extra
 Maintainer: Dennis Kaarsemaker <dennis@kaarsemaker.net>
-Build-Depends: debhelper (>= 7), python-all-dev (>= 2.6), python-sphinx (>= 0.6), python3-all-dev (>= 3.2), libgit2-dev
+Build-Depends: debhelper (>= 7), python-all-dev (>= 2.6), python-sphinx (>= 0.6), python3-all-dev (>= 3.2), libgit2-dev (>=0.20), libgit2-dev (<<0.21)
 Standards-Version: 3.9.3
 XS-Python-Version: >= 2.6
 X-Python3-Version: >= 3.2
