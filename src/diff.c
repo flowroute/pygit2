@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -43,7 +43,7 @@ extern PyTypeObject HunkType;
 PyTypeObject PatchType;
 
 PyObject*
-wrap_diff(git_diff_list *diff, Repository *repo)
+wrap_diff(git_diff *diff, Repository *repo)
 {
     Diff *py_diff;
 
@@ -57,66 +57,67 @@ wrap_diff(git_diff_list *diff, Repository *repo)
     return (PyObject*) py_diff;
 }
 
-PyObject*
-diff_get_patch_byindex(git_diff_list* list, size_t idx)
+PyObject *
+wrap_patch(git_patch *patch)
 {
-    const git_diff_delta* delta;
-    const git_diff_range* range;
-    git_diff_patch* patch = NULL;
-    size_t i, j, hunk_amounts, lines_in_hunk, line_len, header_len;
-    const char* line, *header;
-    char line_origin;
-    int err;
-    Hunk *py_hunk = NULL;
-    Patch *py_patch = NULL;
-    PyObject *py_line_origin=NULL, *py_line=NULL;
+    Patch *py_patch;
 
-    err = git_diff_get_patch(&patch, &delta, list, idx);
-    if (err < 0)
-        return Error_set(err);
+    if (!patch)
+        Py_RETURN_NONE;
 
     py_patch = PyObject_New(Patch, &PatchType);
-    if (py_patch != NULL) {
+    if (py_patch) {
+        size_t i, j, hunk_amounts, lines_in_hunk, additions, deletions;
+        const git_diff_delta *delta;
+        const git_diff_hunk *hunk;
+        const git_diff_line *line;
+        int err;
+
+        delta = git_patch_get_delta(patch);
+
         py_patch->old_file_path = delta->old_file.path;
         py_patch->new_file_path = delta->new_file.path;
         py_patch->status = git_diff_status_char(delta->status);
         py_patch->similarity = delta->similarity;
+        py_patch->flags = delta->flags;
         py_patch->old_oid = git_oid_allocfmt(&delta->old_file.oid);
         py_patch->new_oid = git_oid_allocfmt(&delta->new_file.oid);
 
+        git_patch_line_stats(NULL, &additions, &deletions, patch);
+        py_patch->additions = additions;
+        py_patch->deletions = deletions;
 
-        hunk_amounts = git_diff_patch_num_hunks(patch);
+        hunk_amounts = git_patch_num_hunks(patch);
         py_patch->hunks = PyList_New(hunk_amounts);
-        for (i=0; i < hunk_amounts; ++i) {
-            err = git_diff_patch_get_hunk(&range, &header, &header_len,
-                      &lines_in_hunk, patch, i);
+        for (i = 0; i < hunk_amounts; ++i) {
+            Hunk *py_hunk = NULL;
 
+            err = git_patch_get_hunk(&hunk, &lines_in_hunk, patch, i);
             if (err < 0)
-                goto cleanup;
+                return Error_set(err);
 
             py_hunk = PyObject_New(Hunk, &HunkType);
             if (py_hunk != NULL) {
-                py_hunk->old_start = range->old_start;
-                py_hunk->old_lines = range->old_lines;
-                py_hunk->new_start = range->new_start;
-                py_hunk->new_lines = range->new_lines;
+                py_hunk->old_start = hunk->old_start;
+                py_hunk->old_lines = hunk->old_lines;
+                py_hunk->new_start = hunk->new_start;
+                py_hunk->new_lines = hunk->new_lines;
 
                 py_hunk->lines = PyList_New(lines_in_hunk);
-                for (j=0; j < lines_in_hunk; ++j) {
-                    err = git_diff_patch_get_line_in_hunk(&line_origin,
-                              &line, &line_len, NULL, NULL, patch, i, j);
+                for (j = 0; j < lines_in_hunk; ++j) {
+                    PyObject *py_line_origin = NULL, *py_line = NULL;
 
+                    err = git_patch_get_line_in_hunk(&line, patch, i, j);
                     if (err < 0)
-                      goto cleanup;
+                        return Error_set(err);
 
-                    py_line_origin = to_unicode_n(&line_origin, 1, NULL, NULL);
-                    py_line = to_unicode_n(line, line_len, NULL, NULL);
+                    py_line_origin = to_unicode_n(&line->origin, 1,
+                        NULL, NULL);
+                    py_line = to_unicode_n(line->content, line->content_len,
+                        NULL, NULL);
                     PyList_SetItem(py_hunk->lines, j,
-                        Py_BuildValue("OO",
-                            py_line_origin,
-                            py_line
-                        )
-                    );
+                        Py_BuildValue("OO", py_line_origin, py_line));
+
                     Py_DECREF(py_line_origin);
                     Py_DECREF(py_line);
                 }
@@ -126,11 +127,22 @@ diff_get_patch_byindex(git_diff_list* list, size_t idx)
             }
         }
     }
+    git_patch_free(patch);
 
-cleanup:
-    git_diff_patch_free(patch);
+    return (PyObject*) py_patch;
+}
 
-    return (err < 0) ? Error_set(err) : (PyObject*) py_patch;
+PyObject*
+diff_get_patch_byindex(git_diff *diff, size_t idx)
+{
+    git_patch *patch = NULL;
+    int err;
+
+    err = git_patch_from_diff(&patch, diff, idx);
+    if (err < 0)
+        return Error_set(err);
+
+    return (PyObject*) wrap_patch(patch);
 }
 
 static void
@@ -139,8 +151,8 @@ Patch_dealloc(Patch *self)
     Py_CLEAR(self->hunks);
     free(self->old_oid);
     free(self->new_oid);
-    // we do not have to free old_file_path and new_file_path, they will
-    // be freed by git_diff_list_free in Diff_dealloc
+    /* We do not have to free old_file_path and new_file_path, they will
+     * be freed by git_diff_list_free in Diff_dealloc */
     PyObject_Del(self);
 }
 
@@ -152,6 +164,24 @@ PyMemberDef Patch_members[] = {
     MEMBER(Patch, status, T_CHAR, "status"),
     MEMBER(Patch, similarity, T_INT, "similarity"),
     MEMBER(Patch, hunks, T_OBJECT, "hunks"),
+    MEMBER(Patch, additions, T_INT, "additions"),
+    MEMBER(Patch, deletions, T_INT, "deletions"),
+    {NULL}
+};
+
+PyDoc_STRVAR(Patch_is_binary__doc__, "True if binary data, False if not.");
+
+PyObject *
+Patch_is_binary__get__(Patch *self)
+{
+    if (!(self->flags & GIT_DIFF_FLAG_NOT_BINARY) &&
+            (self->flags & GIT_DIFF_FLAG_BINARY))
+        Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+PyGetSetDef Patch_getseters[] = {
+    GETTER(Patch, is_binary),
     {NULL}
 };
 
@@ -177,7 +207,7 @@ PyTypeObject PatchType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     Patch__doc__,                              /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
@@ -187,7 +217,7 @@ PyTypeObject PatchType = {
     0,                                         /* tp_iternext       */
     0,                                         /* tp_methods        */
     Patch_members,                             /* tp_members        */
-    0,                                         /* tp_getset         */
+    Patch_getseters,                           /* tp_getset         */
     0,                                         /* tp_base           */
     0,                                         /* tp_dict           */
     0,                                         /* tp_descr_get      */
@@ -239,7 +269,7 @@ PyTypeObject DiffIterType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     DiffIter__doc__,                           /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
@@ -249,14 +279,19 @@ PyTypeObject DiffIterType = {
     (iternextfunc) DiffIter_iternext,          /* tp_iternext       */
 };
 
+Py_ssize_t
+Diff_len(Diff *self)
+{
+    assert(self->list);
+    return (Py_ssize_t)git_diff_num_deltas(self->list);
+}
 
 PyDoc_STRVAR(Diff_patch__doc__, "Patch diff string.");
 
 PyObject *
 Diff_patch__get__(Diff *self)
 {
-    const git_diff_delta* delta;
-    git_diff_patch* patch;
+    git_patch* patch;
     char **strings = NULL;
     char *buffer = NULL;
     int err = GIT_ERROR;
@@ -264,19 +299,21 @@ Diff_patch__get__(Diff *self)
     PyObject *py_patch = NULL;
 
     num = git_diff_num_deltas(self->list);
+    if (num == 0)
+        Py_RETURN_NONE;
     MALLOC(strings, num * sizeof(char*), cleanup);
 
     for (i = 0, len = 1; i < num ; ++i) {
-        err = git_diff_get_patch(&patch, &delta, self->list, i);
+        err = git_patch_from_diff(&patch, self->list, i);
         if (err < 0)
             goto cleanup;
 
-        err = git_diff_patch_to_str(&(strings[i]), patch);
+        err = git_patch_to_str(&(strings[i]), patch);
         if (err < 0)
             goto cleanup;
 
         len += strlen(strings[i]);
-        git_diff_patch_free(patch);
+        git_patch_free(patch);
     }
 
     CALLOC(buffer, (len + 1), sizeof(char), cleanup);
@@ -433,7 +470,7 @@ Diff_getitem(Diff *self, PyObject *value)
 static void
 Diff_dealloc(Diff *self)
 {
-    git_diff_list_free(self->list);
+    git_diff_free(self->list);
     Py_CLEAR(self->repo);
     PyObject_Del(self);
 }
@@ -444,7 +481,7 @@ PyGetSetDef Diff_getseters[] = {
 };
 
 PyMappingMethods Diff_as_mapping = {
-    0,                               /* mp_length */
+    (lenfunc)Diff_len,               /* mp_length */
     (binaryfunc)Diff_getitem,        /* mp_subscript */
     0,                               /* mp_ass_subscript */
 };

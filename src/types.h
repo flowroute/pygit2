@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -77,6 +77,11 @@ typedef struct {
     git_config* config;
 } Config;
 
+typedef struct {
+    PyObject_HEAD
+    Config *owner;
+    git_config_iterator *iter;
+} ConfigIter;
 
 /* git_note */
 typedef struct {
@@ -95,7 +100,7 @@ typedef struct {
 
 
 /* git _diff */
-SIMPLE_TYPE(Diff, git_diff_list, list)
+SIMPLE_TYPE(Diff, git_diff, list)
 
 typedef struct {
     PyObject_HEAD
@@ -113,6 +118,9 @@ typedef struct {
     char* new_oid;
     char status;
     unsigned similarity;
+    unsigned additions;
+    unsigned deletions;
+    unsigned flags;
 } Patch;
 
 typedef struct {
@@ -145,7 +153,7 @@ SIMPLE_TYPE(Index, git_index, index)
 
 typedef struct {
     PyObject_HEAD
-    const git_index_entry *entry;
+    git_index_entry entry;
 } IndexEntry;
 
 typedef struct {
@@ -183,12 +191,68 @@ typedef struct {
     PyObject_HEAD
     Object *obj;
     const git_signature *signature;
-    const char *encoding;
+    char *encoding;
 } Signature;
 
 
 /* git_remote */
-SIMPLE_TYPE(Remote, git_remote, remote)
+typedef struct {
+    PyObject_HEAD
+    Repository *repo;
+    git_remote *remote;
+    /* Callbacks for network events */
+    PyObject *progress;
+    PyObject *credentials;
+    PyObject *transfer_progress;
+    PyObject *update_tips;
+} Remote;
 
+/* git_refspec */
+typedef struct {
+    PyObject_HEAD
+    const Remote *owner;
+    const git_refspec *refspec;
+} Refspec;
+
+/* git_transfer_progress */
+typedef struct {
+    PyObject_HEAD
+    unsigned int total_objects;
+    unsigned int indexed_objects;
+    unsigned int received_objects;
+    unsigned int local_objects;
+    unsigned int total_deltas;
+    unsigned int indexed_deltas;
+    size_t received_bytes;
+} TransferProgress;
+
+/* git_blame */
+SIMPLE_TYPE(Blame, git_blame, blame)
+
+typedef struct {
+    PyObject_HEAD
+    Blame* blame;
+    size_t i;
+    size_t n;
+} BlameIter;
+
+typedef struct {
+    PyObject_HEAD
+    unsigned lines_in_hunk;
+    char* final_commit_id;
+    unsigned final_start_line_number;
+    git_signature* final_signature;
+    char* orig_commit_id;
+    char* orig_path;
+    unsigned orig_start_line_number;
+    git_signature* orig_signature;
+    char boundary;
+} BlameHunk;
+
+/* git_merge */
+typedef struct {
+    PyObject_HEAD
+    git_merge_result *result;
+} MergeResult;
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -37,8 +37,9 @@ int
 Signature_init(Signature *self, PyObject *args, PyObject *kwds)
 {
     char *keywords[] = {"name", "email", "time", "offset", "encoding", NULL};
-    PyObject *py_name;
-    char *name, *email, *encoding = "ascii";
+    PyObject *py_name, *tname;
+    char *email, *encoding = "ascii";
+    const char *name;
     long long time = -1;
     int offset = 0;
     int err;
@@ -49,7 +50,7 @@ Signature_init(Signature *self, PyObject *args, PyObject *kwds)
             &py_name, &email, &time, &offset, &encoding))
         return -1;
 
-    name = py_str_to_c_str(py_name, encoding);
+    name = py_str_borrow_c_str(&tname, py_name, encoding);
     if (name == NULL)
         return -1;
 
@@ -58,7 +59,8 @@ Signature_init(Signature *self, PyObject *args, PyObject *kwds)
     } else {
         err = git_signature_new(&signature, name, email, time, offset);
     }
-    free(name);
+    Py_DECREF(tname);
+
     if (err < 0) {
         Error_set(err);
         return -1;
@@ -81,11 +83,12 @@ Signature_init(Signature *self, PyObject *args, PyObject *kwds)
 void
 Signature_dealloc(Signature *self)
 {
-    if (self->obj)
+    /* self->obj is the owner of the git_signature, so we musn't free it */
+    if (self->obj) {
         Py_CLEAR(self->obj);
-    else {
-        git_signature_free((git_signature*)self->signature);
-        free((char*)self->encoding);
+    } else {
+        git_signature_free((git_signature *) self->signature);
+        free(self->encoding);
     }
 
     PyObject_Del(self);
@@ -107,19 +110,19 @@ Signature__encoding__get__(Signature *self)
 }
 
 
-PyDoc_STRVAR(Signature__name__doc__, "Name (bytes).");
+PyDoc_STRVAR(Signature_raw_name__doc__, "Name (bytes).");
 
 PyObject *
-Signature__name__get__(Signature *self)
+Signature_raw_name__get__(Signature *self)
 {
     return to_bytes(self->signature->name);
 }
 
 
-PyDoc_STRVAR(Signature__email__doc__, "Email (bytes).");
+PyDoc_STRVAR(Signature_raw_email__doc__, "Email (bytes).");
 
 PyObject *
-Signature__email__get__(Signature *self)
+Signature_raw_email__get__(Signature *self)
 {
     return to_bytes(self->signature->email);
 }
@@ -162,8 +165,8 @@ Signature_offset__get__(Signature *self)
 
 PyGetSetDef Signature_getseters[] = {
     GETTER(Signature, _encoding),
-    GETTER(Signature, _name),
-    GETTER(Signature, _email),
+    GETTER(Signature, raw_name),
+    GETTER(Signature, raw_email),
     GETTER(Signature, name),
     GETTER(Signature, email),
     GETTER(Signature, time),
@@ -222,12 +225,23 @@ build_signature(Object *obj, const git_signature *signature,
     Signature *py_signature;
 
     py_signature = PyObject_New(Signature, &SignatureType);
+    if (!py_signature)
+        goto on_error;
 
-    if (py_signature) {
-        Py_INCREF(obj);
-        py_signature->obj = obj;
-        py_signature->signature = signature;
-        py_signature->encoding = encoding;
+    py_signature->encoding = NULL;
+    if (encoding) {
+        py_signature->encoding = strdup(encoding);
+        if (!py_signature->encoding)
+            goto on_error;
     }
+
+    Py_XINCREF(obj);
+    py_signature->obj = obj;
+    py_signature->signature = signature;
+
     return (PyObject*)py_signature;
+
+on_error:
+    git_signature_free((git_signature *) signature);
+    return NULL;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -72,7 +72,7 @@ PyDoc_STRVAR(Note_oid__doc__,
 PyObject *
 Note_oid__get__(Note *self)
 {
-  return git_oid_to_python(git_note_oid(self->note));
+    return git_oid_to_python(git_note_oid(self->note));
 }
 
 
@@ -82,7 +82,7 @@ PyDoc_STRVAR(Note_message__doc__,
 PyObject *
 Note_message__get__(Note *self)
 {
-  return to_unicode(git_note_message(self->note), NULL, NULL);
+    return to_unicode(git_note_message(self->note), NULL, NULL);
 }
 
 
@@ -134,7 +134,7 @@ PyTypeObject NoteType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     Note__doc__,                               /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
@@ -200,14 +200,14 @@ PyTypeObject NoteIterType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     NoteIter__doc__,                           /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
     0,                                         /* tp_richcompare    */
     0,                                         /* tp_weaklistoffset */
     PyObject_SelfIter,                         /* tp_iter           */
-   (iternextfunc) NoteIter_iternext,           /* tp_iternext       */
+    (iternextfunc) NoteIter_iternext,          /* tp_iternext       */
 };
 
 

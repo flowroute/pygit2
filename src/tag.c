@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -27,6 +27,7 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include "object.h"
 #include "error.h"
 #include "types.h"
 #include "utils.h"
@@ -44,6 +45,25 @@ Tag_target__get__(Tag *self)
 
     oid = git_tag_target_id(self->tag);
     return git_oid_to_python(oid);
+}
+
+
+PyDoc_STRVAR(Tag_get_object__doc__,
+  "get_object() -> object\n"
+  "\n"
+  "Retrieves the object the current tag is pointing to.");
+
+PyObject *
+Tag_get_object(Tag *self)
+{
+    int err;
+    git_object* obj;
+
+    err = git_tag_peel(&obj, self->tag);
+    if (err < 0)
+        return Error_set(err);
+
+    return wrap_object(obj, self->repo);
 }
 
 
@@ -94,6 +114,11 @@ Tag__message__get__(Tag *self)
     return PyBytes_FromString(git_tag_message(self->tag));
 }
 
+PyMethodDef Tag_methods[] = {
+    METHOD(Tag, get_object, METH_NOARGS),
+    {NULL}
+};
+
 PyGetSetDef Tag_getseters[] = {
     GETTER(Tag, target),
     GETTER(Tag, name),
@@ -126,7 +151,7 @@ PyTypeObject TagType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     Tag__doc__,                                /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
@@ -134,7 +159,7 @@ PyTypeObject TagType = {
     0,                                         /* tp_weaklistoffset */
     0,                                         /* tp_iter           */
     0,                                         /* tp_iternext       */
-    0,                                         /* tp_methods        */
+    Tag_methods,                               /* tp_methods        */
     0,                                         /* tp_members        */
     Tag_getseters,                             /* tp_getset         */
     0,                                         /* tp_base           */

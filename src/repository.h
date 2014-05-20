@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -63,8 +63,12 @@ PyObject*
 Repository_create_reference(Repository *self, PyObject *args, PyObject* kw);
 
 PyObject* Repository_packall_references(Repository *self,  PyObject *args);
-PyObject* Repository_status(Repository *self, PyObject *args);
+PyObject* Repository_status(Repository *self);
 PyObject* Repository_status_file(Repository *self, PyObject *value);
 PyObject* Repository_TreeBuilder(Repository *self, PyObject *args);
+
+PyObject* Repository_blame(Repository *self, PyObject *args, PyObject *kwds);
+
+PyObject* Repository_merge(Repository *self, PyObject *py_oid);
 
 #endif

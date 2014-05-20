@@ -1,4 +1,3 @@
-
 ######################################################################
 pygit2 - libgit2 bindings in Python
 ######################################################################
@@ -45,55 +44,237 @@ for the topic), send a pull request.
 Authors
 ==============
 
-This is the list of authors of pygit2, sorted by number of commits (as shown by
-``git shortlog -sn``):
+62 developers have contributed at least 1 commit to pygit2::
 
-- J David Ibáñez
-- Nico von Geyso
-- W Trevor King
-- Dave Borowitz
-- Carlos Martín Nieto
-- Richo Healey
-- Christian Boos
-- Julien Miotte
-- Martin Lenders
-- Xavier Delannoy
-- Yonggang Luo
-- Valentin Haenel
-- Bernardo Heynemann
-- John Szakmeister
-- David Versmisse
-- Petr Hosek
-- Sebastian Thiel
-- Han-Wen Nienhuys
-- Petr Viktorin
-- Alex Chamberlain
-- Amit Bakshi
-- Andrey Devyatkin
-- Ben Davis
-- Daniel Rodríguez Troitiño
-- Hervé Cauwelier
-- Jared Flatow
-- Sarath Lakshman
-- Vicent Marti
-- Zoran Zaric
-- András Veres-Szentkirályi
-- Benjamin Kircher
-- Benjamin Pollack
-- Bryan O'Sullivan
-- David Sanders
-- Eric Davis
-- Eric Schrijver
-- Erik van Zijst
-- Ferengee
-- Fraser Tweedale
-- Hugh Cole-Baker
-- Josh Bleecher Snyder
-- Jun Omae
-- Ridge Kennedy
-- Rui Abreu Ferreira
-- Xu Tao
-- pistacchio
+  J. David Ibáñez            Rémi Duraffort             András Veres-Szentkirályi
+  Nico von Geyso             Sebastian Thiel            Benjamin Kircher
+  Carlos Martín Nieto        Fraser Tweedale            Benjamin Pollack
+  W. Trevor King             Han-Wen Nienhuys           Bryan O'Sullivan
+  Dave Borowitz              Leonardo Rhodes            David Fischer
+  Daniel Rodríguez Troitiño  Petr Viktorin              David Sanders
+  Richo Healey               Alex Chamberlain           Devaev Maxim
+  Christian Boos             Amit Bakshi                Eric Davis
+  Julien Miotte              Andrey Devyatkin           Erik Meusel
+  Xu Tao                     Ben Davis                  Erik van Zijst
+  Jose Plana                 Eric Schrijver             Ferengee
+  Martin Lenders             Hervé Cauwelier            Gustavo Di Pietro
+  Petr Hosek                 Huang Huang                Hugh Cole-Baker
+  Victor Garcia              Jared Flatow               Josh Bleecher Snyder
+  Xavier Delannoy            Jiunn Haur Lim             Jun Omae
+  Yonggang Luo               Sarath Lakshman            Óscar San José
+  Valentin Haenel            Vicent Marti               Ridge Kennedy
+  Bernardo Heynemann         Zoran Zaric                Rui Abreu Ferreira
+  John Szakmeister           Adam Spiers                Thomas Kluyver
+  Brodie Rao                 Alexander Bayandin         earl
+  David Versmisse            Andrew Chin
+
+
+Changelog
+==============
+
+0.20.3 (2014-04-02)
+-------------------
+
+- A number of memory issues fixed
+  `#328 <https://github.com/libgit2/pygit2/pull/328>`_
+  `#348 <https://github.com/libgit2/pygit2/pull/348>`_
+  `#353 <https://github.com/libgit2/pygit2/pull/353>`_
+  `#355 <https://github.com/libgit2/pygit2/pull/355>`_
+  `#356 <https://github.com/libgit2/pygit2/pull/356>`_
+- Compatibility fixes for
+  PyPy (`#338 <https://github.com/libgit2/pygit2/pull/338>`_),
+  Visual Studio 2008 (`#343 <https://github.com/libgit2/pygit2/pull/343>`_)
+  and Python 3.3 (`#351 <https://github.com/libgit2/pygit2/pull/351>`_)
+- Make the sort mode parameter in ``Repository.walk(...)`` optional
+  `#337 <https://github.com/libgit2/pygit2/pull/337>`_
+- New ``Object.peel(...)``
+  `#342 <https://github.com/libgit2/pygit2/pull/342>`_
+- New ``Index.add_all(...)``
+  `#344 <https://github.com/libgit2/pygit2/pull/344>`_
+- Introduce support for libgit2 options
+  `#350 <https://github.com/libgit2/pygit2/pull/350>`_
+- More informative repr for ``Repository`` objects
+  `#352 <https://github.com/libgit2/pygit2/pull/352>`_
+- Introduce support for credentials
+  `#354 <https://github.com/libgit2/pygit2/pull/354>`_
+- Several documentation fixes
+  `#302 <https://github.com/libgit2/pygit2/issues/302>`_
+  `#336 <https://github.com/libgit2/pygit2/issues/336>`_
+- Tests, remove temporary files
+  `#341 <https://github.com/libgit2/pygit2/pull/341>`_
+
+
+0.20.2 (2014-02-04)
+-------------------
+
+- Support pypy
+  `#209 <https://github.com/libgit2/pygit2/issues/209>`_
+  `#327 <https://github.com/libgit2/pygit2/pull/327>`_
+  `#333 <https://github.com/libgit2/pygit2/pull/333>`_
+
+Repository:
+
+- New ``Repository.default_signature``
+  `#310 <https://github.com/libgit2/pygit2/pull/310>`_
+
+Oid:
+
+- New ``str(Oid)`` deprecates ``Oid.hex``
+  `#322 <https://github.com/libgit2/pygit2/pull/322>`_
+
+Object:
+
+- New ``Object.id`` deprecates ``Object.oid``
+  `#322 <https://github.com/libgit2/pygit2/pull/322>`_
+
+- New ``TreeEntry.id`` deprecates ``TreeEntry.oid``
+  `#322 <https://github.com/libgit2/pygit2/pull/322>`_
+
+- New ``Blob.diff(...)`` and ``Blob.diff_to_buffer(...)``
+  `#307 <https://github.com/libgit2/pygit2/pull/307>`_
+
+- New ``Commit.tree_id`` and ``Commit.parent_ids``
+  `#73 <https://github.com/libgit2/pygit2/issues/73>`_
+  `#311 <https://github.com/libgit2/pygit2/pull/311>`_
+
+- New rich comparison between tree entries
+  `#305 <https://github.com/libgit2/pygit2/issues/305>`_
+  `#313 <https://github.com/libgit2/pygit2/pull/313>`_
+
+- Now ``Tree.__contains__(key)`` supports paths
+  `#306 <https://github.com/libgit2/pygit2/issues/306>`_
+  `#316 <https://github.com/libgit2/pygit2/pull/316>`_
+
+Index:
+
+- Now possible to create ``IndexEntry(...)``
+  `#325 <https://github.com/libgit2/pygit2/pull/325>`_
+
+- Now ``IndexEntry.path``, ``IndexEntry.oid`` and ``IndexEntry.mode`` are
+  writable
+  `#325 <https://github.com/libgit2/pygit2/pull/325>`_
+
+- Now ``Index.add(...)`` accepts an ``IndexEntry`` too
+  `#325 <https://github.com/libgit2/pygit2/pull/325>`_
+
+- Now ``Index.write_tree(...)`` is able to write to a different repository
+  `#325 <https://github.com/libgit2/pygit2/pull/325>`_
+
+- Fix memory leak in ``IndexEntry.path`` setter
+  `#335 <https://github.com/libgit2/pygit2/pull/335>`_
+
+Config:
+
+- New ``Config`` iterator replaces ``Config.foreach``
+  `#183 <https://github.com/libgit2/pygit2/issues/183>`_
+  `#312 <https://github.com/libgit2/pygit2/pull/312>`_
+
+Remote:
+
+- New type ``Refspec``
+  `#314 <https://github.com/libgit2/pygit2/pull/314>`_
+
+- New ``Remote.push_url``
+  `#315 <https://github.com/libgit2/pygit2/pull/314>`_
+
+- New ``Remote.add_push`` and ``Remote.add_fetch``
+  `#255 <https://github.com/libgit2/pygit2/issues/255>`_
+  `#318 <https://github.com/libgit2/pygit2/pull/318>`_
+
+- New ``Remote.fetch_refspecs`` replaces ``Remote.get_fetch_refspecs()`` and
+  ``Remote.set_fetch_refspecs(...)``
+  `#319 <https://github.com/libgit2/pygit2/pull/319>`_
+
+- New ``Remote.push_refspecs`` replaces ``Remote.get_push_refspecs()`` and
+  ``Remote.set_push_refspecs(...)``
+  `#319 <https://github.com/libgit2/pygit2/pull/319>`_
+
+- New ``Remote.progress``, ``Remote.transfer_progress`` and
+  ``Remote.update_tips``
+  `#274 <https://github.com/libgit2/pygit2/issues/274>`_
+  `#324 <https://github.com/libgit2/pygit2/pull/324>`_
+
+- New type ``TransferProgress``
+  `#274 <https://github.com/libgit2/pygit2/issues/274>`_
+  `#324 <https://github.com/libgit2/pygit2/pull/324>`_
+
+- Fix refcount leak in ``Repository.remotes``
+  `#321 <https://github.com/libgit2/pygit2/issues/321>`_
+  `#332 <https://github.com/libgit2/pygit2/pull/332>`_
+
+Other: `#331 <https://github.com/libgit2/pygit2/pull/331>`_
+
+
+0.20.1 (2013-12-24)
+-------------------
+
+- New remote ref-specs API:
+  `#290 <https://github.com/libgit2/pygit2/pull/290>`_
+
+- New ``Repository.reset(...)``:
+  `#292 <https://github.com/libgit2/pygit2/pull/292>`_,
+  `#294 <https://github.com/libgit2/pygit2/pull/294>`_
+
+- Export ``GIT_DIFF_MINIMAL``:
+  `#293 <https://github.com/libgit2/pygit2/pull/293>`_
+
+- New ``Repository.merge(...)``:
+  `#295 <https://github.com/libgit2/pygit2/pull/295>`_
+
+- Fix ``Repository.blame`` argument handling:
+  `#297 <https://github.com/libgit2/pygit2/pull/297>`_
+
+- Fix build error on Windows:
+  `#298 <https://github.com/libgit2/pygit2/pull/298>`_
+
+- Fix typo in the README file, Blog → Blob:
+  `#301 <https://github.com/libgit2/pygit2/pull/301>`_
+
+- Now ``Diff.patch`` returns ``None`` if no patch:
+  `#232 <https://github.com/libgit2/pygit2/pull/232>`_,
+  `#303 <https://github.com/libgit2/pygit2/pull/303>`_
+
+- New ``Walker.simplify_first_parent()``:
+  `#304 <https://github.com/libgit2/pygit2/pull/304>`_
+
+0.20.0 (2013-11-24)
+-------------------
+
+- Upgrade to libgit2 v0.20.0:
+  `#288 <https://github.com/libgit2/pygit2/pull/288>`_
+
+- New ``Repository.head_is_unborn`` replaces ``Repository.head_is_orphaned``
+
+- Changed ``pygit2.clone_repository(...)``. Drop ``push_url``, ``fetch_spec``
+  and ``push_spec`` parameters. Add ``ignore_cert_errors``.
+
+- New ``Patch.additions`` and ``Patch.deletions``:
+  `#275 <https://github.com/libgit2/pygit2/pull/275>`_
+
+- New ``Patch.is_binary``:
+  `#276 <https://github.com/libgit2/pygit2/pull/276>`_
+
+- New ``Reference.log_append(...)``:
+  `#277 <https://github.com/libgit2/pygit2/pull/277>`_
+
+- New ``Blob.is_binary``:
+  `#278 <https://github.com/libgit2/pygit2/pull/278>`_
+
+- New ``len(Diff)`` shows the number of patches:
+  `#281 <https://github.com/libgit2/pygit2/pull/281>`_
+
+- Rewrite ``Repository.status()``:
+  `#283 <https://github.com/libgit2/pygit2/pull/283>`_
+
+- New ``Reference.shorthand``:
+  `#284 <https://github.com/libgit2/pygit2/pull/284>`_
+
+- New ``Repository.blame(...)``:
+  `#285 <https://github.com/libgit2/pygit2/pull/285>`_
+
+- Now ``Repository.listall_references()`` and
+  ``Repository.listall_branches()`` return a list, not a tuple:
+  `#289 <https://github.com/libgit2/pygit2/pull/289>`_
 
 
 License

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -36,6 +36,7 @@
 #include "diff.h"
 
 extern PyTypeObject TreeType;
+extern PyTypeObject TreeEntryType;
 extern PyTypeObject DiffType;
 extern PyTypeObject TreeIterType;
 extern PyTypeObject IndexType;
@@ -66,15 +67,65 @@ TreeEntry_name__get__(TreeEntry *self)
 }
 
 
-PyDoc_STRVAR(TreeEntry_oid__doc__, "Object id.");
+PyDoc_STRVAR(TreeEntry_id__doc__, "Object id.");
 
 PyObject *
-TreeEntry_oid__get__(TreeEntry *self)
+TreeEntry_id__get__(TreeEntry *self)
 {
     const git_oid *oid;
 
     oid = git_tree_entry_id(self->entry);
     return git_oid_to_python(oid);
+}
+
+PyDoc_STRVAR(TreeEntry_oid__doc__, "Object id.\n"
+    "This attribute is deprecated. Please use 'id'");
+
+PyObject *
+TreeEntry_oid__get__(TreeEntry *self)
+{
+    return TreeEntry_id__get__(self);
+}
+
+PyObject *
+TreeEntry_richcompare(PyObject *a, PyObject *b, int op)
+{
+    PyObject *res;
+    int cmp;
+
+    /* We only support comparing to another tree entry */
+    if (!PyObject_TypeCheck(b, &TreeEntryType)) {
+        Py_INCREF(Py_NotImplemented);
+        return Py_NotImplemented;
+    }
+
+    cmp =git_tree_entry_cmp(((TreeEntry*)a)->entry, ((TreeEntry*)b)->entry);
+    switch (op) {
+        case Py_LT:
+            res = (cmp <= 0) ? Py_True: Py_False;
+            break;
+        case Py_LE:
+            res = (cmp < 0) ? Py_True: Py_False;
+            break;
+        case Py_EQ:
+            res = (cmp == 0) ? Py_True: Py_False;
+            break;
+        case Py_NE:
+            res = (cmp != 0) ? Py_True: Py_False;
+            break;
+        case Py_GT:
+            res = (cmp > 0) ? Py_True: Py_False;
+            break;
+        case Py_GE:
+            res = (cmp >= 0) ? Py_True: Py_False;
+            break;
+        default:
+            PyErr_Format(PyExc_RuntimeError, "Unexpected '%d' op", op);
+            return NULL;
+    }
+
+    Py_INCREF(res);
+    return res;
 }
 
 
@@ -91,6 +142,7 @@ PyGetSetDef TreeEntry_getseters[] = {
     GETTER(TreeEntry, filemode),
     GETTER(TreeEntry, name),
     GETTER(TreeEntry, oid),
+    GETTER(TreeEntry, id),
     GETTER(TreeEntry, hex),
     {NULL}
 };
@@ -118,11 +170,11 @@ PyTypeObject TreeEntryType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     TreeEntry__doc__,                          /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
-    0,                                         /* tp_richcompare    */
+    (richcmpfunc)TreeEntry_richcompare,        /* tp_richcompare    */
     0,                                         /* tp_weaklistoffset */
     0,                                         /* tp_iter           */
     0,                                         /* tp_iternext       */
@@ -149,14 +201,28 @@ Tree_len(Tree *self)
 int
 Tree_contains(Tree *self, PyObject *py_name)
 {
-    int result = 0;
-    char *name = py_path_to_c_str(py_name);
+    int err;
+    git_tree_entry *entry;
+    char *name;
+
+    name = py_path_to_c_str(py_name);
     if (name == NULL)
         return -1;
 
-    result = git_tree_entry_byname(self->tree, name) ? 1 : 0;
+    err = git_tree_entry_bypath(&entry, self->tree, name);
     free(name);
-    return result;
+
+    if (err == GIT_ENOTFOUND)
+        return 0;
+
+    if (err < 0) {
+        Error_set(err);
+        return -1;
+    }
+
+    git_tree_entry_free(entry);
+
+    return 1;
 }
 
 TreeEntry *
@@ -290,7 +356,7 @@ PyObject *
 Tree_diff_to_workdir(Tree *self, PyObject *args)
 {
     git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
-    git_diff_list *diff;
+    git_diff *diff;
     Repository *py_repo;
     int err;
 
@@ -328,7 +394,7 @@ PyObject *
 Tree_diff_to_index(Tree *self, PyObject *args, PyObject *kwds)
 {
     git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
-    git_diff_list *diff;
+    git_diff *diff;
     Repository *py_repo;
     int err;
 
@@ -373,7 +439,7 @@ PyObject *
 Tree_diff_to_tree(Tree *self, PyObject *args, PyObject *kwds)
 {
     git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
-    git_diff_list *diff;
+    git_diff *diff;
     git_tree *from, *to, *tmp;
     Repository *py_repo;
     int err, swap = 0;
@@ -452,7 +518,7 @@ PyTypeObject TreeType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     Tree__doc__,                               /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */
@@ -523,7 +589,7 @@ PyTypeObject TreeIterType = {
     0,                                         /* tp_getattro       */
     0,                                         /* tp_setattro       */
     0,                                         /* tp_as_buffer      */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags          */
+    Py_TPFLAGS_DEFAULT,                        /* tp_flags          */
     TreeIter__doc__,                           /* tp_doc            */
     0,                                         /* tp_traverse       */
     0,                                         /* tp_clear          */

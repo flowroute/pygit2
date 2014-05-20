@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -42,6 +42,7 @@
 /* Python 2 support */
 #if PY_MAJOR_VERSION == 2
   #define PyLong_FromSize_t PyInt_FromSize_t
+  #define PyLong_AsSize_t (size_t)PyInt_AsSsize_t
   #define PyLong_AsLong PyInt_AsLong
   #undef PyLong_Check
   #define PyLong_Check PyInt_Check
@@ -58,6 +59,10 @@
 #else
   #define to_path(x) to_unicode(x, Py_FileSystemDefaultEncoding, "strict")
   #define to_encoding(x) PyUnicode_DecodeASCII(x, strlen(x), "strict")
+#endif
+
+#ifdef PYPY_VERSION
+  #define PyLong_AsSize_t (size_t)PyLong_AsUnsignedLong
 #endif
 
 #ifndef Py_hash_t
@@ -84,7 +89,8 @@
 
 PYGIT2_FN_UNUSED
 Py_LOCAL_INLINE(PyObject*)
-to_unicode_n(const char *value, size_t len, const char *encoding, const char *errors)
+to_unicode_n(const char *value, size_t len, const char *encoding,
+             const char *errors)
 {
     if (encoding == NULL) {
         /* If the encoding is not explicit, it may not be UTF-8, so it
@@ -106,6 +112,12 @@ to_bytes(const char * value)
 }
 
 char * py_str_to_c_str(PyObject *value, const char *encoding);
+const char *py_str_borrow_c_str(PyObject **tvaue, PyObject *value, const char *encoding);
+
+PyObject * get_pylist_from_git_strarray(git_strarray *strarray);
+int get_strarraygit_from_pylist(git_strarray *array, PyObject *pylist);
+
+int callable_to_credentials(git_cred **out, const char *url, const char *username_from_url, unsigned int allowed_types, PyObject *credentials);
 
 #define py_path_to_c_str(py_path) \
         py_str_to_c_str(py_path, Py_FileSystemDefaultEncoding)
@@ -130,6 +142,9 @@ char * py_str_to_c_str(PyObject *value, const char *encoding);
 
 #define MEMBER(type, attr, attr_type, docstr)\
   {#attr, attr_type, offsetof(type, attr), 0, PyDoc_STR(docstr)}
+
+#define RMEMBER(type, attr, attr_type, docstr)\
+  {#attr, attr_type, offsetof(type, attr), READONLY, PyDoc_STR(docstr)}
 
 
 /* Helpers for memory allocation */

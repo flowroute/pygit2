@@ -25,6 +25,7 @@ Start:
    :maxdepth: 1
 
    install
+   recipes
 
 Usage guide:
 
@@ -43,6 +44,8 @@ Usage guide:
    merge
    config
    remotes
+   blame
+   settings
 
 
 Indices and tables

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 The pygit2 contributors
+ * Copyright 2010-2014 The pygit2 contributors
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2,
@@ -27,13 +27,24 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <osdefs.h>
+
+/* Pypy does not provide this header */
+#ifndef PYPY_VERSION
+# include <osdefs.h>
+#endif
+
 #include <git2.h>
 #include "error.h"
 #include "types.h"
 #include "utils.h"
 #include "repository.h"
 #include "oid.h"
+#include "options.h"
+
+/* FIXME: This is for pypy */
+#ifndef MAXPATHLEN
+# define MAXPATHLEN 1024
+#endif
 
 extern PyObject *GitError;
 
@@ -56,14 +67,21 @@ extern PyTypeObject IndexEntryType;
 extern PyTypeObject IndexIterType;
 extern PyTypeObject WalkerType;
 extern PyTypeObject ConfigType;
+extern PyTypeObject ConfigIterType;
 extern PyTypeObject ReferenceType;
 extern PyTypeObject RefLogIterType;
 extern PyTypeObject RefLogEntryType;
 extern PyTypeObject BranchType;
 extern PyTypeObject SignatureType;
 extern PyTypeObject RemoteType;
+extern PyTypeObject RefspecType;
+extern PyTypeObject TransferProgressType;
 extern PyTypeObject NoteType;
 extern PyTypeObject NoteIterType;
+extern PyTypeObject BlameType;
+extern PyTypeObject BlameIterType;
+extern PyTypeObject BlameHunkType;
+extern PyTypeObject MergeResultType;
 
 
 
@@ -98,9 +116,16 @@ init_repository(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 };
 
+static int
+credentials_cb(git_cred **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *data)
+{
+    PyObject *credentials = (PyObject *) data;
+
+    return callable_to_credentials(out, url, username_from_url, allowed_types, credentials);
+}
+
 PyDoc_STRVAR(clone_repository__doc__,
-    "clone_repository(url, path, bare, remote_name, push_url,"
-    "fetch_spec, push_spec, checkout_branch)\n"
+    "clone_repository(url, path, bare, remote_name, checkout_branch)\n"
     "\n"
     "Clones a Git repository in the given url to the given path "
     "with the specified options.\n"
@@ -115,14 +140,6 @@ PyDoc_STRVAR(clone_repository__doc__,
     "  If 'bare' is not 0, then a bare git repository will be created.\n"
     "remote_name\n"
     "  The name given to the 'origin' remote.  The default is 'origin'.\n"
-    "push_url\n"
-    "  URL to be used for pushing.\n"
-    "fetch_spec\n"
-    "  The fetch specification to be used for fetching. None results in "
-    "the same behavior as GIT_REMOTE_DEFAULT_FETCH.\n"
-    "push_spec\n"
-    "  The fetch specification to be used for pushing. None means use the "
-    "same spec as for 'fetch_spec'\n"
     "checkout_branch\n"
     "  The name of the branch to checkout. None means use the remote's "
     "HEAD.\n");
@@ -133,29 +150,29 @@ clone_repository(PyObject *self, PyObject *args) {
     git_repository *repo;
     const char *url;
     const char *path;
-    unsigned int bare;
-    const char *remote_name, *push_url, *fetch_spec;
-    const char *push_spec, *checkout_branch;
+    unsigned int bare, ignore_cert_errors;
+    const char *remote_name, *checkout_branch;
+    PyObject *credentials = NULL;
     int err;
+    git_clone_options opts = GIT_CLONE_OPTIONS_INIT;
 
-    if (!PyArg_ParseTuple(args, "zzIzzzzz",
-                &url, &path, &bare, &remote_name, &push_url,
-                &fetch_spec, &push_spec, &checkout_branch))
+    if (!PyArg_ParseTuple(args, "zzIIzzO",
+                          &url, &path, &bare, &ignore_cert_errors, &remote_name, &checkout_branch, &credentials))
         return NULL;
 
-    git_clone_options opts = {
-        .version=1,
-        .bare=bare,
-        .remote_name=remote_name,
-        .pushurl=push_url,
-        .fetch_spec=fetch_spec,
-        .push_spec=push_spec,
-        .checkout_branch=checkout_branch
-    };
+    opts.bare = bare;
+    opts.ignore_cert_errors = ignore_cert_errors;
+    opts.remote_name = remote_name;
+    opts.checkout_branch = checkout_branch;
+
+    if (credentials != Py_None) {
+	    opts.remote_callbacks.credentials = credentials_cb;
+	    opts.remote_callbacks.payload = credentials;
+    }
 
     err = git_clone(&repo, url, path, &opts);
     if (err < 0)
-        return Error_set_str(err, path);
+        return Error_set(err);
 
     git_repository_free(repo);
     Py_RETURN_NONE;
@@ -237,11 +254,12 @@ hash(PyObject *self, PyObject *args)
 PyMethodDef module_methods[] = {
     {"init_repository", init_repository, METH_VARARGS, init_repository__doc__},
     {"clone_repository", clone_repository, METH_VARARGS,
-        clone_repository__doc__},
+     clone_repository__doc__},
     {"discover_repository", discover_repository, METH_VARARGS,
      discover_repository__doc__},
     {"hashfile", hashfile, METH_VARARGS, hashfile__doc__},
     {"hash", hash, METH_VARARGS, hash__doc__},
+    {"option", option, METH_VARARGS, option__doc__},
     {NULL}
 };
 
@@ -256,6 +274,12 @@ moduleinit(PyObject* m)
     ADD_CONSTANT_INT(m, LIBGIT2_VER_MINOR)
     ADD_CONSTANT_INT(m, LIBGIT2_VER_REVISION)
     ADD_CONSTANT_STR(m, LIBGIT2_VERSION)
+
+    /* libgit2 options */
+    ADD_CONSTANT_INT(m, GIT_OPT_GET_SEARCH_PATH);
+    ADD_CONSTANT_INT(m, GIT_OPT_SET_SEARCH_PATH);
+    ADD_CONSTANT_INT(m, GIT_OPT_GET_MWINDOW_SIZE);
+    ADD_CONSTANT_INT(m, GIT_OPT_SET_MWINDOW_SIZE);
 
     /* Errors */
     GitError = PyErr_NewException("_pygit2.GitError", NULL, NULL);
@@ -283,7 +307,7 @@ moduleinit(PyObject* m)
     INIT_TYPE(TreeType, &ObjectType, NULL)
     INIT_TYPE(TreeEntryType, NULL, NULL)
     INIT_TYPE(TreeIterType, NULL, NULL)
-    INIT_TYPE(TreeBuilderType, NULL, PyType_GenericNew)
+    INIT_TYPE(TreeBuilderType, NULL, NULL)
     INIT_TYPE(BlobType, &ObjectType, NULL)
     INIT_TYPE(TagType, &ObjectType, NULL)
     ADD_TYPE(m, Object)
@@ -310,16 +334,24 @@ moduleinit(PyObject* m)
     /*
      * Log
      */
-    INIT_TYPE(WalkerType, NULL, PyType_GenericNew)
+    INIT_TYPE(WalkerType, NULL, NULL)
+    ADD_TYPE(m, Walker);
     ADD_CONSTANT_INT(m, GIT_SORT_NONE)
     ADD_CONSTANT_INT(m, GIT_SORT_TOPOLOGICAL)
     ADD_CONSTANT_INT(m, GIT_SORT_TIME)
     ADD_CONSTANT_INT(m, GIT_SORT_REVERSE)
 
     /*
+     * Reset
+     */
+    ADD_CONSTANT_INT(m, GIT_RESET_SOFT)
+    ADD_CONSTANT_INT(m, GIT_RESET_MIXED)
+    ADD_CONSTANT_INT(m, GIT_RESET_HARD)
+
+    /*
      * References
      */
-    INIT_TYPE(ReferenceType, NULL, PyType_GenericNew)
+    INIT_TYPE(ReferenceType, NULL, NULL)
     INIT_TYPE(RefLogEntryType, NULL, NULL)
     INIT_TYPE(RefLogIterType, NULL, NULL)
     INIT_TYPE(NoteType, NULL, NULL)
@@ -335,7 +367,7 @@ moduleinit(PyObject* m)
     /*
      * Branches
      */
-    INIT_TYPE(BranchType, &ReferenceType, PyType_GenericNew);
+    INIT_TYPE(BranchType, &ReferenceType, NULL);
     ADD_TYPE(m, Branch)
     ADD_CONSTANT_INT(m, GIT_BRANCH_LOCAL)
     ADD_CONSTANT_INT(m, GIT_BRANCH_REMOTE)
@@ -344,7 +376,7 @@ moduleinit(PyObject* m)
      * Index & Working copy
      */
     INIT_TYPE(IndexType, NULL, PyType_GenericNew)
-    INIT_TYPE(IndexEntryType, NULL, NULL)
+    INIT_TYPE(IndexEntryType, NULL, PyType_GenericNew)
     INIT_TYPE(IndexIterType, NULL, NULL)
     ADD_TYPE(m, Index)
     ADD_TYPE(m, IndexEntry)
@@ -388,14 +420,15 @@ moduleinit(PyObject* m)
     ADD_CONSTANT_INT(m, GIT_DIFF_IGNORE_WHITESPACE_EOL)
     ADD_CONSTANT_INT(m, GIT_DIFF_IGNORE_SUBMODULES)
     ADD_CONSTANT_INT(m, GIT_DIFF_PATIENCE)
+    ADD_CONSTANT_INT(m, GIT_DIFF_MINIMAL)
     ADD_CONSTANT_INT(m, GIT_DIFF_INCLUDE_IGNORED)
     ADD_CONSTANT_INT(m, GIT_DIFF_INCLUDE_UNTRACKED)
     ADD_CONSTANT_INT(m, GIT_DIFF_INCLUDE_UNMODIFIED)
     ADD_CONSTANT_INT(m, GIT_DIFF_RECURSE_UNTRACKED_DIRS)
     ADD_CONSTANT_INT(m, GIT_DIFF_RECURSE_UNTRACKED_DIRS)
     ADD_CONSTANT_INT(m, GIT_DIFF_DISABLE_PATHSPEC_MATCH)
-    ADD_CONSTANT_INT(m, GIT_DIFF_DELTAS_ARE_ICASE)
-    ADD_CONSTANT_INT(m, GIT_DIFF_INCLUDE_UNTRACKED_CONTENT)
+    ADD_CONSTANT_INT(m, GIT_DIFF_IGNORE_CASE)
+    ADD_CONSTANT_INT(m, GIT_DIFF_SHOW_UNTRACKED_CONTENT)
     ADD_CONSTANT_INT(m, GIT_DIFF_SKIP_BINARY_CHECK)
     ADD_CONSTANT_INT(m, GIT_DIFF_INCLUDE_TYPECHANGE)
     ADD_CONSTANT_INT(m, GIT_DIFF_INCLUDE_TYPECHANGE_TREES)
@@ -413,12 +446,45 @@ moduleinit(PyObject* m)
     ADD_CONSTANT_INT(m, GIT_DIFF_FIND_AND_BREAK_REWRITES)
 
     /* Config */
+    ADD_CONSTANT_INT(m, GIT_CONFIG_LEVEL_LOCAL);
+    ADD_CONSTANT_INT(m, GIT_CONFIG_LEVEL_GLOBAL);
+    ADD_CONSTANT_INT(m, GIT_CONFIG_LEVEL_XDG);
+    ADD_CONSTANT_INT(m, GIT_CONFIG_LEVEL_SYSTEM);
+
     INIT_TYPE(ConfigType, NULL, PyType_GenericNew)
+    INIT_TYPE(ConfigIterType, NULL, NULL)
     ADD_TYPE(m, Config)
+    ADD_TYPE(m, ConfigIter)
 
     /* Remotes */
     INIT_TYPE(RemoteType, NULL, NULL)
+    INIT_TYPE(RefspecType, NULL, NULL)
+    INIT_TYPE(TransferProgressType, NULL, NULL)
     ADD_TYPE(m, Remote)
+    ADD_TYPE(m, Refspec)
+    ADD_TYPE(m, TransferProgress)
+    /* Direction for the refspec */
+    ADD_CONSTANT_INT(m, GIT_DIRECTION_FETCH)
+    ADD_CONSTANT_INT(m, GIT_DIRECTION_PUSH)
+    /* Credential types */
+    ADD_CONSTANT_INT(m, GIT_CREDTYPE_USERPASS_PLAINTEXT)
+    ADD_CONSTANT_INT(m, GIT_CREDTYPE_SSH_KEY)
+
+    /* Blame */
+    INIT_TYPE(BlameType, NULL, NULL)
+    INIT_TYPE(BlameIterType, NULL, NULL)
+    INIT_TYPE(BlameHunkType, NULL, NULL)
+    ADD_TYPE(m, Blame)
+    ADD_TYPE(m, BlameHunk)
+    ADD_CONSTANT_INT(m, GIT_BLAME_NORMAL)
+    ADD_CONSTANT_INT(m, GIT_BLAME_TRACK_COPIES_SAME_FILE)
+    ADD_CONSTANT_INT(m, GIT_BLAME_TRACK_COPIES_SAME_COMMIT_MOVES)
+    ADD_CONSTANT_INT(m, GIT_BLAME_TRACK_COPIES_SAME_COMMIT_COPIES)
+    ADD_CONSTANT_INT(m, GIT_BLAME_TRACK_COPIES_ANY_COMMIT_COPIES)
+
+    /* Merge */
+    INIT_TYPE(MergeResultType, NULL, NULL)
+    ADD_TYPE(m, MergeResult)
 
     /* Global initialization of libgit2 */
     git_threads_init();

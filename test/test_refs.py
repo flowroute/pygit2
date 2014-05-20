@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 #
-# Copyright 2010-2013 The pygit2 contributors
+# Copyright 2010-2014 The pygit2 contributors
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2,
@@ -54,10 +54,6 @@ class ReferencesTest(utils.RepoTestCase):
                          ['refs/heads/i18n', 'refs/heads/master',
                           'refs/tags/version1'])
 
-        # Now we list only the symbolic references
-        self.assertEqual(repo.listall_references(GIT_REF_SYMBOLIC),
-                         ('refs/tags/version1', ))
-
     def test_head(self):
         head = self.repo.head
         self.assertEqual(LAST_COMMIT, self.repo[head.target].hex)
@@ -107,6 +103,11 @@ class ReferencesTest(utils.RepoTestCase):
         reference.target = 'refs/heads/i18n'
         self.assertEqual(reference.target, 'refs/heads/i18n')
 
+    def test_get_shorthand(self):
+        reference = self.repo.lookup_reference('refs/heads/master')
+        self.assertEqual(reference.shorthand, 'master')
+        reference = self.repo.create_reference('refs/remotes/origin/master', LAST_COMMIT)
+        self.assertEqual(reference.shorthand, 'origin/master')
 
     def test_delete(self):
         repo = self.repo
@@ -212,7 +213,7 @@ class ReferencesTest(utils.RepoTestCase):
     def test_get_object(self):
         repo = self.repo
         ref = repo.lookup_reference('refs/heads/master')
-        self.assertEqual(repo[ref.target].oid, ref.get_object().oid)
+        self.assertEqual(repo[ref.target].id, ref.get_object().id)
 
 
 if __name__ == '__main__':
