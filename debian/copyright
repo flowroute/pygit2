@@ -1,0 +1,31 @@
+This work was packaged for Debian by:
+
+    Dennis Kaarsemaker <dennis@kaarsemaker.net> on zo mrt  3 00:50:43 CET 2013
+
+It was downloaded from:
+
+    <http://github.com/libgit2/pygit2>
+
+License:
+
+ Note that the only valid version of the GPL as far as this project
+ is concerned is _this_ particular version of the license (ie v2, not
+ v2.2 or v3.x or whatever), unless explicitly otherwise stated.
+
+ In addition to the permissions in the GNU General Public License,
+ the authors give you unlimited permission to link the compiled
+ version of this file into combinations with other programs,
+ and to distribute those combinations without any restriction
+ coming from the use of this file.  (The General Public License
+ restrictions do apply in other respects; for example, they cover
+ modification of the file, and distribution when not linked into
+ a combined executable.)
+
+On Debian systems, the complete text of the GNU General
+Public License version 3 can be found in `/usr/share/common-licenses/GPL-3'.
+
+The Debian packaging is:
+
+    Copyright (C) 2013 Dennis Kaarsemaker <dennis@kaarsemaker.net>
+
+and is licensed under the GPL version 2, see above.
