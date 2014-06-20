@@ -1,3 +1,9 @@
+pygit2 (0.20.3+git20140620) trusty; urgency=low
+
+  * New release from latest git
+
+ -- Matthew Williams <matthew@flowroute.com>  Fri, 20 June 2014 17:08:06 +0000
+
 pygit2 (0.20.3-1) trusty; urgency=medium
 
   * New release

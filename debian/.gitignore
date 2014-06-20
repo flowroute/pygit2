@@ -1,0 +1,8 @@
+*.log
+*.debhelper
+*.substvars
+files
+tmp/
+python-pygit2/
+python3-pygit2/
+
