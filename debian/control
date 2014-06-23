@@ -9,14 +9,14 @@ X-Python3-Version: >= 3.2
 
 Package: python-pygit2
 Architecture: any
-Depends: ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Depends: ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}, python-cffi
 Description: Python bindings to libgit2
  libgit2 implements the core functionality of git, this package provides a
  python 2 interface to that library.
 
 Package: python3-pygit2
 Architecture: any
-Depends: ${python3:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Depends: ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}, python3-cffi
 Description: Python bindings to libgit2
  libgit2 implements the core functionality of git, this package provides a
  python 3 interface to that library.
